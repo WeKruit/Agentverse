@@ -96,6 +96,8 @@
 
 **REQ-CW-006**: The wallet MUST maintain an index file (`~/.agentverse/wallet/index.json`) mapping credential IDs to file paths, credential types, issuance dates, expiration dates, and attribute names contained in each credential. This index MUST be updated atomically on any credential change.
 
+**REQ-CW-006a**: The `profile.json` file (containing the structured profile data produced by the Profile Extractor before credential issuance) MUST be encrypted at rest using the same passphrase-derived AES-256-GCM key used for the wallet (see REQ-CW-007). The profile MUST NOT be stored as plaintext JSON on disk. The encrypted profile MUST be stored at `~/.agentverse/wallet/profile.json.enc` with a unique nonce per encryption operation. The profile is decrypted into memory during wallet unlock and re-encrypted on any update.
+
 **REQ-CW-007**: Credential files at rest MUST be encrypted using AES-256-GCM, with the encryption key derived from a user-supplied passphrase via Argon2id (memory cost: 64 MB, iterations: 3, parallelism: 4). The salt MUST be unique per wallet and stored in `~/.agentverse/wallet/salt`. The nonce MUST be unique per file encryption operation.
 
 **REQ-CW-008**: The wallet MUST support an "unlocked" session model: the user provides their passphrase once per CLI session, and the derived key is held in memory for the session duration. The key MUST be zeroed from memory when the session ends or after a configurable inactivity timeout (default: 15 minutes).
@@ -127,6 +129,8 @@
 **REQ-CW-021**: The `issuer` field in self-issued credentials MUST be the user's DID (e.g., `did:web:localhost:agentverse:user`). The `credentialSubject.id` field MUST be the same DID.
 
 **REQ-CW-022**: Self-issued credentials MUST be understood by verifiers as self-attested claims. The system MUST NOT represent self-issued credentials as having third-party authority. The CLI MUST clearly label credentials as "self-attested from conversation history" in any user-facing output.
+
+**REQ-CW-022a**: Self-issued credentials MUST ALWAYS be labeled "self-attested" in ALL user-facing and API-facing contexts. The word "verified" MUST NEVER be used to describe self-issued credentials -- not in CLI output, not in API responses, not in Verifiable Presentation metadata, and not in documentation presented to verifiers. Acceptable labels include "self-attested", "self-declared", or "self-issued". This applies to every surface where a credential's provenance is communicated, including A2A protocol messages, JSON response fields, and human-readable displays.
 
 **REQ-CW-023**: The trust value of self-attested credentials comes from: (a) the consistency of the claims across multiple conversation extractions, (b) the cryptographic binding to the user's DID, and (c) the BBS+ signature enabling selective disclosure without re-signing. The system MUST NOT claim that self-issued credentials are "verified" by a third party.
 
@@ -193,6 +197,8 @@
 | `AgentverseInterestsCredential` | Hobbies, interests, passions | Personal interests; dating/social use case |
 | `AgentversePreferencesCredential` | Communication style, work preferences, tool preferences | Professional context sharing |
 | `AgentverseBasicProfileCredential` | Location (city-level), age range, languages spoken | Basic demographics; general use case |
+
+> **OPEN DESIGN DECISION**: The number of credential categories (currently 4 as listed above) is unresolved. An alternative proposal uses 6 categories, splitting additional profile domains into their own credential types (e.g., separating `AgentverseWorkStyleCredential` and `AgentverseValuesCredential` from the current Preferences and BasicProfile categories). This decision is to be resolved during the Week 1 BBS+ proof-of-concept, where the team will evaluate the tradeoffs of granularity vs. overhead (more credential types means more base proofs to manage, more padding, and more complexity in the VP assembly logic, but finer-grained metadata isolation). Until resolved, implementations SHOULD use the 4-category model above as the default but MUST NOT hard-code assumptions that prevent adding categories later.
 
 **REQ-CW-051**: The system MUST NOT issue a single monolithic credential containing all profile attributes. Rationale:
 - **Selective disclosure granularity**: While BBS+ allows per-claim selective disclosure within a credential, presenting any claims from a credential reveals the credential's type and metadata (issuer, issuance date). Separating domains limits metadata leakage. A verifier receiving an `AgentverseSkillsCredential` does not learn that the user also has an `AgentverseInterestsCredential`.
@@ -267,6 +273,16 @@
 5. Serializes the derived proof with header bytes (`0xd9, 0x5d, 0x03` for baseline)
 
 **REQ-BBS-031**: The system MUST accept selective disclosure requests as an array of JSON pointer strings. Example: `["/credentialSubject/skills/0/name", "/credentialSubject/skills/0/yearsExperience"]` to disclose only the first skill's name and years of experience.
+
+**REQ-BBS-031a** *(MVP scoping decision)*: For MVP, the system MUST use **hardcoded disclosure presets** rather than arbitrary per-field selection by the user. The three presets are:
+
+| Preset | Description | Disclosed Fields |
+|---|---|---|
+| **minimal** | Bare minimum for interaction | Credential type, issuer DID, issuance date (mandatory fields only -- no substantive claims beyond what BBS+ requires) |
+| **professional** | Recruiting / professional networking | Skill names, proficiency levels, years of experience, languages spoken, city-level location |
+| **full** | Maximum voluntary disclosure | All non-mandatory fields in the selected credentials |
+
+The `agentverse share` command MUST accept a `--preset` flag (e.g., `agentverse share --with ditto.ai --preset professional`). Per-field selection (arbitrary JSON pointer arrays) is architecturally supported (see REQ-BBS-031) but is NOT exposed to end users in the MVP CLI. Per-field selection is a Phase 2 UX enhancement. Rationale: hardcoded presets reduce user cognitive load and prevent accidental over-disclosure during the MVP phase.
 
 **REQ-BBS-032**: The derived proof MUST be a valid Data Integrity proof that a verifier can verify using only: the disclosed claims, the derived proof value, and the issuer's public key. The verifier MUST NOT need the original base proof or undisclosed claims.
 
@@ -530,7 +546,9 @@
 | **Selective disclosure via BBS+ ProofGen** | Derived proof creation with JSON pointer-based claim selection | REQ-BBS-030 through REQ-BBS-033 |
 | **Verifiable Presentation construction** | W3C VP envelope with one or more VCs containing BBS derived proofs | REQ-VP-001 through REQ-VP-013 |
 | **Nonce-based replay prevention** | Verifier-supplied challenge bound into presentationHeader | REQ-VP-030 through REQ-VP-034 |
-| **Domain-level credential granularity** | Four credential types: Skills, Interests, Preferences, BasicProfile | REQ-CW-050 through REQ-CW-053 |
+| **Domain-level credential granularity** | Four credential types (4 vs. 6 categories is an open design decision): Skills, Interests, Preferences, BasicProfile | REQ-CW-050 through REQ-CW-053 |
+| **Hardcoded disclosure presets** | Three presets (minimal, professional, full) instead of per-field selection for MVP | REQ-BBS-031a |
+| **Encrypted profile storage** | profile.json encrypted at rest with same passphrase-derived key as wallet | REQ-CW-006a |
 | **Profile-to-VC mapping** | Structured claims with nested objects, confidence scores, freshness timestamps | REQ-MAP-001 through REQ-MAP-052 |
 | **Credential re-issuance on profile change** | New credential issued when claims change; old credential superseded | REQ-CW-043 through REQ-CW-045 |
 | **Credential expiration** | 90-day default TTL; expired credentials blocked from presentation | REQ-CW-033, REQ-CW-039 |
@@ -549,6 +567,8 @@
 | **Pseudonym-based linkability** | Phase 2 | BBS bbs-2023 `"pseudonym"` feature option. Enables domain-specific pseudonyms for controlled re-identification within a single verifier relationship. |
 | **VP-level signing** | Phase 2 | An outer proof on the VP that binds the VP to the holder. Currently breaks unlinkability. Needed when holder binding is required. |
 | **Third-party issued credentials** | Phase 2 | Wallet architecturally supports them, but no issuance flow from external parties is built in MVP. |
+| **E2E encryption of shared presentations** | Phase 2 | End-to-end encryption of VPs in transit (e.g., using recipient public keys) is deferred. MVP relies on transport-layer security (HTTPS) for A2A communication. |
+| **Per-field selective disclosure UX** | Phase 2 | MVP uses hardcoded disclosure presets (minimal, professional, full). Arbitrary per-field JSON pointer selection is architecturally supported but not exposed in the CLI. |
 | **FHE (Fully Homomorphic Encryption)** | Phase 3 | 10,000x-1,000,000x overhead on CPUs. Not practical for CLI tool today. |
 | **MPC (Secure Multi-Party Computation)** | Phase 3 | Requires interactive protocols between agents. Higher latency. Useful for compatibility scoring on encrypted data. |
 | **Composite proofs across credentials** | Phase 3 | Proving relationships between claims in different credentials (e.g., "skill X in credential A and location Y in credential B belong to the same holder"). Requires advanced proof systems (Dock Network's composite proof framework or similar). |
@@ -582,17 +602,17 @@ The end-to-end MVP flow for credentials is:
    -> Shows all claims in a specific credential
 
 4. SHARE (Selective Disclosure)
-   agentverse share --with ditto.ai --claims interests,ageRange
+   agentverse share --with ditto.ai --preset professional
    -> Fetch and verify Ditto AI's Agent Card
    -> Consent Manager evaluates and prompts user
    -> User approves
    -> Privacy Engine:
-      a. Finds AgentverseInterestsCredential and AgentverseBasicProfileCredential
-      b. Generates BBS+ derived proof for interests (selective pointers)
-      c. Generates BBS+ derived proof for age range (selective pointers)
-      d. Assembles VP with both derived VCs
+      a. Resolves "professional" preset to disclosure pointer set
+      b. Finds relevant credentials (e.g., AgentverseSkillsCredential, AgentverseBasicProfileCredential)
+      c. Generates BBS+ derived proof for each credential (selective pointers per preset)
+      d. Assembles VP with derived VCs
       e. Includes verifier's challenge in presentationHeader
-   -> A2A Client sends VP to Ditto AI's endpoint
+   -> Sharing pipeline sends VP to Ditto AI's endpoint via A2A
    -> Audit log records the sharing event
 
 5. VERIFY (Third-party side)
@@ -621,6 +641,8 @@ These questions are identified but need not be resolved before implementation be
 3. **DID:web for localhost**: For MVP, the user's DID is `did:web:localhost:agentverse:user`. This works locally but is not resolvable by remote verifiers. For the MVP demo, the verifier will need the public key provided out-of-band (included in the VP or fetched via A2A). Production DID resolution is a Phase 2 concern.
 
 4. **Performance validation**: Benchmark the Digital Bazaar BBS implementation against REQ-BBS-050 targets early in development. If it is too slow, evaluate the MATTR WASM alternative before building significant integration.
+
+5. **Credential category count (4 vs. 6)**: The debate did not resolve whether to use 4 or 6 credential categories. The 4-category model (Skills, Interests, Preferences, BasicProfile) is simpler but may bundle unrelated claims (e.g., communication style and tool preferences both live in Preferences). The 6-category model provides finer metadata isolation but increases proof management overhead. This MUST be resolved during the Week 1 BBS+ proof-of-concept by testing both configurations against real profile data and measuring VP assembly complexity, padding overhead, and metadata leakage surface.
 
 ---
 

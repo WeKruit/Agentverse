@@ -215,6 +215,7 @@ Attributes map to W3C Verifiable Credential `credentialSubject` claims using Sch
 - REQ-VC-02: Each profile attribute category becomes a separate VC (not one monolithic credential). This enables per-attribute selective disclosure.
 - REQ-VC-03: All VCs use the `bbs-2023` cryptosuite for BBS+ signatures.
 - REQ-VC-04: The VC `issuer` is the user's own agent (self-issued). This is honest — the user is attesting to their own attributes. Third-party attestations (employer confirms role, etc.) are a future extension.
+- REQ-VC-05: All self-issued credentials must include a `"credentialType": "self-attested"` property in the VC metadata, making it explicit to verifiers that these claims are user-asserted and not third-party attested.
 
 ---
 
@@ -517,8 +518,9 @@ The extracted profile is stored locally as JSON before being converted to Verifi
 - REQ-OUT-04: The `sensitivity` field determines the default sharing policy:
   - `low`: Shareable by default with any verified agent
   - `medium`: Requires explicit user consent per sharing request
-  - `high`: Requires explicit user consent AND can only be shared as a ZK predicate proof (e.g., age range, not exact age)
+  - `high`: Requires explicit user consent AND in MVP, shared via BBS+ selective disclosure of range/generalized values (e.g., `age_range` not exact age). Phase 2 adds ZK predicate proofs for additional privacy.
 - REQ-OUT-05: The `conflicts` array must be empty (all conflicts resolved) before VCs can be issued. The CLI must block VC issuance and prompt the user to resolve conflicts first.
+- REQ-OUT-06: In MVP, the profile-to-VC transformation uses hardcoded disclosure presets (`minimal`, `professional`, `full`) rather than per-field attribute picking. Each preset defines a fixed set of attribute categories and sensitivity levels included in the disclosed credential. Per-field granularity is deferred to a future release.
 
 ---
 
@@ -533,6 +535,7 @@ The extracted profile is stored locally as JSON before being converted to Verifi
 ### 6.2 Security
 
 - REQ-NF-04: The profile file (`~/.agentverse/profile.json`) must be created with file permissions `0600` (owner read/write only).
+- REQ-NF-04a: The profile file must be encrypted at rest using AES-256-GCM with a key derived via Argon2id from a user-supplied passphrase. The file on disk must never contain plaintext profile data. The CLI must prompt for the passphrase on any operation that reads or writes the profile.
 - REQ-NF-05: Extraction state (`~/.agentverse/extraction-state.json`) must also be `0600`.
 - REQ-NF-06: No conversation content or profile data is ever written to system logs, temp files, or crash reports.
 - REQ-NF-07: If the user interrupts extraction (Ctrl+C), partial results must be cleaned up — no partial profile files left on disk.

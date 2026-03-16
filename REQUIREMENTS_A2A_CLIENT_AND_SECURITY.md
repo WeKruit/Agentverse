@@ -32,7 +32,8 @@
 | **VP** | Verifiable Presentation -- a W3C VC Data Model 2.0 container holding one or more Verifiable Credentials with selective disclosure. |
 | **DID** | Decentralized Identifier -- a self-controlled, URI-scheme identifier resolving to a DID Document containing public keys. |
 | **JWS** | JSON Web Signature (RFC 7515) -- a compact or JSON-serialized signed payload. |
-| **Guardian Agent** | The user's local Agentverse agent running on their machine. |
+| **Sharing Pipeline** | The data-minimized pipeline within the Agentverse client that loads only the approved credentials needed for a specific interaction. Replaces the earlier "Guardian Agent" concept. |
+| **Agentverse Client** | The user's local Agentverse CLI application running on their machine. |
 | **Third-Party Agent** | An external agent (e.g., Ditto AI, WeKruit) that requests user profile data. |
 
 ---
@@ -113,7 +114,7 @@
 
 | ID | Requirement | Priority |
 |----|------------|----------|
-| R2.7 | All outbound messages from the Guardian Agent to third-party agents MUST use `DataPart` exclusively for payload content. The `DataPart` MUST have `type: "data"`, a `mimeType` of `"application/json"`, and a `data` field containing a JSON object. | MUST |
+| R2.7 | All outbound messages from the sharing pipeline to third-party agents MUST use `DataPart` exclusively for payload content. The `DataPart` MUST have `type: "data"`, a `mimeType` of `"application/json"`, and a `data` field containing a JSON object. | MUST |
 | R2.8 | Outbound `DataPart` payloads MUST conform to a well-defined Agentverse JSON Schema. The schema MUST be referenced in the `schema` field of the `DataPart` using a URI pointing to the Agentverse schema registry (e.g., `https://agentverse.dev/schemas/v1/profile-share.json`). | SHOULD |
 | R2.9 | The client MUST NOT send `TextPart` content in outbound messages to third-party agents. Textual metadata (e.g., purpose descriptions) MUST be embedded as fields within the `DataPart` JSON object, never as separate `TextPart` entries. | MUST |
 | R2.10 | When receiving responses from third-party agents, the client MUST process `DataPart` entries and MUST ignore `TextPart` entries. `TextPart` content from external agents MUST NOT be: (a) displayed to the user as actionable instructions, (b) passed to any LLM for interpretation, (c) used to influence control flow decisions. `TextPart` content MAY be logged for debugging purposes only. | MUST |
@@ -130,6 +131,7 @@
 | R2.16 | The Artifact `metadata` object MUST include: `agentverse.vpVersion` (string, `"vc-data-model-2.0"`), `agentverse.disclosedAttributes` (array of strings listing the attribute names being disclosed), `agentverse.purpose` (string, the declared purpose from the consent policy). | MUST |
 | R2.17 | The VP JSON object within the Artifact MUST conform to the W3C VC Data Model 2.0 Verifiable Presentation format: `@context` MUST include `"https://www.w3.org/ns/credentials/v2"` as the first entry, `type` MUST include `"VerifiablePresentation"`, `verifiableCredential` MUST contain one or more VCs, and a `proof` section MUST be present. | MUST |
 | R2.18 | The VP MUST contain only the selectively disclosed attributes approved by the Consent Manager. The client MUST verify, immediately before sending, that every attribute in the VP appears in the active consent policy's `allow.attributes` list. If any attribute is not approved, the send MUST be aborted. | MUST |
+| R2.18a | Verifiable Credentials issued by the user themselves (i.e., where the issuer DID matches the holder DID) MUST always be labeled `"self-attested"` in the credential metadata. The term `"verified"` MUST NOT be used for self-issued credentials. The `credentialSubject` or Artifact `metadata` MUST include `"agentverse.attestation": "self-attested"` to make the provenance unambiguous to relying parties. | MUST |
 
 ### 3.4 Task Lifecycle Management
 
@@ -197,12 +199,12 @@
 
 | ID | Requirement | Priority |
 |----|------------|----------|
-| R3.7 | The Guardian Agent MUST generate its own Ed25519 key pair on first initialization using `jose.generateKeyPair('EdDSA', { crv: 'Ed25519' })`. | MUST |
+| R3.7 | The Agentverse client MUST generate its own Ed25519 key pair on first initialization using `jose.generateKeyPair('EdDSA', { crv: 'Ed25519' })`. | MUST |
 | R3.8 | The private key MUST be stored at `~/.agentverse/keys/agent-private.jwk` with file permissions `0600` (owner read/write only). The file MUST contain the JWK representation of the private key exported via `jose.exportJWK()`. | MUST |
 | R3.9 | The public key MUST be stored at `~/.agentverse/keys/agent-public.jwk` with file permissions `0644`. This file is used to construct the user's DID Document. | MUST |
 | R3.10 | On every system where the CLI is installed, the key pair MUST be unique. Keys MUST NOT be copied between machines unless the user explicitly exports and imports them via `agentverse keys export` and `agentverse keys import`. | MUST |
 | R3.11 | The client MUST provide `agentverse keys rotate` to generate a new key pair. The old key pair MUST be archived (not deleted) at `~/.agentverse/keys/archive/{timestamp}/` for a retention period of 90 days. | SHOULD |
-| R3.12 | The Guardian Agent MUST sign its own Agent Card using Compact JWS serialization with the `EdDSA` algorithm and the agent's private key. The JWS payload MUST be the deterministic canonical JSON of the Agent Card (sorted keys, no whitespace, `signature` field removed). | MUST |
+| R3.12 | The Agentverse client MUST sign its own Agent Card using Compact JWS serialization with the `EdDSA` algorithm and the agent's private key. The JWS payload MUST be the deterministic canonical JSON of the Agent Card (sorted keys, no whitespace, `signature` field removed). | MUST |
 
 ### 4.3 `did:web` Resolution for Third-Party Agent Verification
 
@@ -371,7 +373,7 @@ rules:
 
 | ID | Feature | Reason for Deferral |
 |----|---------|---------------------|
-| R5.20 | **End-to-end message encryption** (encrypting `DataPart` content with the recipient's public key) | Requires key exchange protocol design and agreement on encryption envelope format. TLS provides transport-level encryption for MVP. |
+| R5.20 | **End-to-end message encryption** (encrypting `DataPart` content with the recipient's public key) | Requires key exchange protocol design and agreement on encryption envelope format. TLS provides transport-level encryption for MVP. **Note:** Deferred after adversarial review found bare age encryption provides confidentiality but no sender authentication (Critical gap). Phase 2 will implement sign-then-encrypt via DIDComm v2 authcrypt. |
 | R5.21 | **OAuth 2.0 / OpenID Connect flows** for agent authentication | MVP uses pre-shared bearer tokens or API keys. Full OAuth requires authorization server infrastructure. |
 | R5.22 | **Mutual TLS (mTLS)** for client certificate authentication | Requires PKI infrastructure and certificate management. Bearer tokens suffice for MVP. |
 | R5.23 | **CaMeL-style Dual LLM defense** (privileged/quarantined LLM split) | Requires significant architectural work (process isolation, capability enforcer). MVP mitigates by not processing `TextPart` and not exposing tools. |

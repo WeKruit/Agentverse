@@ -18,25 +18,27 @@ Users have spent hundreds of hours in LLM conversations that implicitly contain 
 
 ### In Scope (Phase 1)
 
-| Component | What It Does |
-|-----------|-------------|
-| **CLI (`agentverse`)** | User interface for extraction, review, sharing, and consent |
-| **Profile Extractor** | Parses Claude Code JSONL + ChatGPT JSON exports → structured profile |
-| **Credential Wallet** | Issues BBS+ signed W3C Verifiable Credentials over profile attributes |
-| **Privacy Engine v1** | Generates Verifiable Presentations with selective disclosure |
-| **A2A Client** | Agent Card discovery, JWS verification, SendMessage (JSON-RPC 2.0) |
-| **Consent Manager v1** | YAML policies, interactive CLI consent, append-only audit log |
-| **Security Baseline** | HTTPS-only, structured data only, unsigned card rejection, rate limiting |
+| Component | What It Does | Has Profile Access? |
+|-----------|-------------|:---:|
+| **CLI (`agentverse`)** | User interface for extraction, review, sharing, and consent | No |
+| **Sharing Pipeline** | Per-interaction: loads only approved credentials, generates VP, sends via A2A | Only approved attributes |
+| **Profile Extractor** | Parses Claude Code JSONL + ChatGPT JSON exports → structured profile | Yes (offline) |
+| **Credential Wallet** | Issues BBS+ signed W3C Verifiable Credentials over profile attributes | Encrypted at rest |
+| **A2A Client** | Agent Card discovery, JWS verification, SendMessage (JSON-RPC 2.0) | Only the VP payload |
+| **Consent Manager v1** | JSON config, interactive CLI consent, append-only audit log | No (attribute names only) |
 
 ### Explicitly Deferred (Phase 2+)
 
 | Feature | Phase | Rationale |
 |---------|-------|-----------|
+| E2E encryption (sign-then-encrypt) | 2 | Bare age has no sender auth (Critical gap). Ship sign-then-encrypt properly via DIDComm v2 authcrypt. TLS sufficient for MVP. |
 | ZKP predicate proofs (Noir) | 2 | BBS+ selective disclosure covers MVP needs |
-| Dual LLM defense (CaMeL) | 2 | MVP uses structured-data-only as primary defense |
+| FIDES taint labels / SEAgent MAC | 2 | In-process data scoping is primary defense in MVP |
 | OAuth 2.1 agent flows | 2 | MVP uses simpler scoped tokens |
-| End-to-end message encryption | 2 | TLS + structured data is sufficient baseline |
+| Process-level isolation (--experimental-permission) | 2 | In-process data scoping sufficient for push-only MVP; process isolation needed when processing untrusted inbound |
 | Progressive trust tiers | 2 | MVP: binary verified/unverified |
+| Key rotation protocol | 2 | MVP: single key pair, manual re-keying |
+| Revocation registry | 2 | MVP: short-lived credentials (90-day TTL) |
 | mTLS between agents | 2 | HTTPS + JWS verification sufficient for MVP |
 | Canary tokens | 2 | Not critical for push-only architecture |
 | gVisor sandboxing | 3 | Only needed when processing complex agent responses |
@@ -270,29 +272,46 @@ When no pre-authorized policy matches, display:
 
 ## 8. Security Baseline
 
-### 8.1 MVP Security Requirements
+### 8.1 Two-Pillar Defense Model
+
+*Note: age E2E encryption was evaluated and deferred to Phase 2 after adversarial review found it provides confidentiality but NO sender authentication (Critical gap). Bare age encryption creates a false sense of security. Phase 2 will implement sign-then-encrypt (DIDComm v2 authcrypt pattern) properly.*
+
+| Pillar | Principle | MVP Implementation |
+|--------|-----------|-------------------|
+| **Data Minimization** | Sharing pipeline never has data it doesn't need | `share` command loads only approved credential files; never loads full profile. Enforced by code architecture (no import path to full profile from sharing module). |
+| **Structured Data Only** | Can't inject instructions into data | All A2A messages use `DataPart` (JSON schema validated); `TextPart` rejected |
+
+**Transport security**: HTTPS/TLS 1.2+ for all communication (industry standard, sufficient for MVP threat model).
+
+### 8.2 MVP Security Requirements
 
 | Requirement | Implementation |
 |-------------|---------------|
+| **Data-minimized sharing pipeline** | `share` command loads only approved credential files via `readCredentials(approvedList)`. No call to `readProfile()`. No separate OS process needed — enforced by module architecture. |
+| **BBS+ selective disclosure** | VP reveals only approved claims, not entire credential categories. Cryptographic exclusion, not just omission. |
 | **HTTPS only** | Reject HTTP endpoints. TLS 1.2+. No escape hatch. |
 | **Agent Card JWS verification** | Reject unsigned cards. Verify against DID Document public key. |
 | **Structured data only** | All outbound A2A messages use `DataPart`. Never send `TextPart`. |
 | **Inbound filtering** | Accept only `DataPart` from external agents. Reject and log `TextPart`. |
-| **Rate limiting** | Per-domain: 10 requests/min, 100/hr. No localhost exemption. |
-| **Audit logging** | All sharing events, Agent Card fetches, consent decisions logged. |
+| **Audit logging** | All sharing events, Agent Card fetches, consent decisions logged (no profile data in logs). |
 | **No markdown rendering** | Never render HTML/markdown from external agents. Plain text display only. |
 | **File permissions** | All local files `0600` (keys, profile, policies, audit log). |
+| **Profile encrypted at rest** | `profile.json` encrypted with wallet passphrase, not stored as plaintext. |
 | **No raw content in profile** | Profile contains structured attributes only, never conversation text. |
 | **SSRF prevention** | Reject Agent Card endpoints pointing to private/loopback IPs. |
+| **Self-attested labeling** | Self-issued credentials always labeled "self-attested", never "verified". |
+| **Mandatory user review** | Extracted attributes must be reviewed before VC issuance. Non-negotiable. |
 
-### 8.2 What MVP Does NOT Defend Against (Deferred Risks)
+### 8.3 What MVP Does NOT Defend Against (Documented Limitations)
 
 | Risk | Why Deferred | Mitigation in MVP |
 |------|-------------|-------------------|
-| Compromised agent with valid credentials | Needs progressive trust + reputation (Phase 2) | User must manually verify agents; audit trail detects anomalies |
-| Sophisticated prompt injection | CaMeL dual-LLM needed (Phase 2) | MVP is push-only; user's agent doesn't process complex inbound instructions |
-| Linkability of presentations | ZKP + unlinkable proofs needed (Phase 2) | BBS+ provides basic unlinkability; documented as known limitation |
-| Token theft/replay | Short-lived tokens + mTLS (Phase 2) | 5-minute nonce TTL on VPs; HTTPS protects transport |
+| CDN/proxy eavesdropping | E2E encryption deferred (needs sign-then-encrypt, not bare age) | TLS transport encryption; selective disclosure limits exposure |
+| Compromised agent with valid credentials | Needs progressive trust + reputation (Phase 2) | Data minimization limits blast radius to approved attributes only |
+| Sophisticated prompt injection | Taint tracking needed for bidirectional comms (Phase 2) | MVP is push-only; sharing pipeline has no LLM, no untrusted input processing |
+| Linkability of presentations | Full unlinkability needs advanced BBS+ features (Phase 2) | BBS+ provides basic unlinkability; documented limitation |
+| Local malware reading ~/.agentverse/ | Needs OS-level sandboxing (Phase 3) | File permissions (0600), profile encrypted at rest, wallet encrypted |
+| Supply chain attack on npm deps | Ongoing risk | Pin exact versions, run `npm audit`, vendor critical crypto libs |
 
 ---
 
@@ -353,7 +372,7 @@ When no pre-authorized policy matches, display:
 | **DID resolution** | did-resolver + web-did-resolver | latest | did:web method resolution |
 | **HTTP** | Built-in fetch | — | A2A communication |
 | **Streaming JSON** | stream-json | latest | Large ChatGPT export parsing |
-| **Encryption at rest** | Node.js crypto (AES-256-GCM) | — | Key storage encryption |
+| **Encryption at rest** | Node.js crypto (AES-256-GCM) | — | Key + profile storage encryption |
 | **Key derivation** | argon2 (npm) | latest | Passphrase → encryption key |
 | **Config files** | yaml (npm) | latest | Policy file parsing |
 
@@ -392,20 +411,34 @@ All files created with `0600` permissions.
 
 ## 12. Acceptance Criteria
 
+### Week 1 Gate: BBS+ Proof-of-Concept (Days 1-5)
+
+Before any other code is written, prove the crypto works:
+- [ ] Generate BLS12-381 key pair with Digital Bazaar library
+- [ ] Sign a VC with `bbs-2023` cryptosuite using a custom JSON-LD context
+- [ ] Produce a derived proof with selective disclosure (reveal 3 of 10 claims)
+- [ ] Verify the derived proof with a second library or test vectors
+
+**If this takes > 5 days**: Emergency reassessment. Consider per-attribute Ed25519 VCs as tactical retreat.
+
 ### Must-Have for MVP Launch
 
 - [ ] `agentverse extract` successfully parses Claude Code JSONL and produces a structured profile
 - [ ] `agentverse extract` successfully parses ChatGPT `conversations.json` export
-- [ ] Profile review flow: user can confirm, edit, delete, flag attributes interactively
+- [ ] Mandatory user review of extracted attributes before VC issuance
 - [ ] `agentverse credentials issue` produces valid BBS+ signed W3C VCs (verifiable by standard VC verifiers)
-- [ ] `agentverse share` fetches Agent Card, verifies JWS, prompts for consent, sends VP via A2A
-- [ ] Selective disclosure works: VP contains only user-approved attributes, verifier cannot access hidden ones
+- [ ] **BBS+ selective disclosure**: VP contains only user-approved attributes; verifier cannot access hidden claims
+- [ ] `agentverse share` fetches Agent Card from `/.well-known/agent.json`, verifies JWS, prompts for consent, sends VP via A2A
+- [ ] **Data-minimized sharing**: `share` command loads only approved credential files, never loads full profile
 - [ ] Unsigned Agent Cards are rejected with clear error message
-- [ ] All sharing events logged to audit trail
+- [ ] Self-issued credentials labeled "self-attested" everywhere (never "verified")
+- [ ] `profile.json` encrypted at rest (not stored as plaintext)
+- [ ] All sharing events logged to audit trail (no profile data in logs)
 - [ ] No conversation text appears in profile, VCs, VPs, or audit log
-- [ ] Pre-processing redaction filter catches common secret patterns (API keys, passwords)
+- [ ] Pre-processing redaction filter runs before LLM extraction (API keys, passwords, PII patterns)
 - [ ] HTTPS-only enforcement (HTTP endpoints rejected)
-- [ ] Rate limiting prevents abuse (10/min, 100/hr per domain)
+- [ ] Mock agent in repo for testing and demo
+- [ ] ChatGPT parser: cycle detection, streaming for large files, depth limits
 
 ### Nice-to-Have for MVP
 
@@ -427,6 +460,8 @@ All files created with `0600` permissions.
 | LLM extraction accuracy too low | Medium | Medium | Mandatory user review; confidence thresholds; iterative prompt refinement |
 | did:web requires HTTPS hosting for user's DID | Medium | Low | MVP: use localhost DID for development; document production hosting requirement |
 | Performance: BBS+ proof generation too slow in pure JS | Medium | Medium | Benchmark early; MATTR WASM fallback ready |
+| age encryption library maturity in JS/TS | Low | Medium | age spec is simple; sodium-native as fallback for X25519+ChaCha20 |
+| Scoped instance isolation on user's machine | Medium | Medium | Process-level isolation in MVP; gVisor in Phase 3 |
 | User doesn't have LLM API key for extraction | Low | Low | Support Ollama for local inference; document API key setup |
 
 ---
