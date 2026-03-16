@@ -120,13 +120,13 @@
 
 **REQ-CW-017**: Key rotation is DEFERRED from MVP. When implemented (Phase 2), key rotation MUST re-issue all existing credentials with the new key and update the DID Document. Old credentials signed with the prior key MUST remain verifiable for a grace period (configurable, default 30 days).
 
-**REQ-CW-018**: The wallet MUST associate the BLS12-381 public key with the user's `did:web` DID. The DID Document MUST contain a `verificationMethod` entry of type `Multikey` with the public key encoded in Multibase format.
+**REQ-CW-018**: The wallet MUST associate the BLS12-381 public key with the user's `did:jwk` DID. The `did:jwk` method is self-certifying (derived directly from the public key, no DNS dependency) and EACP-compatible. The DID Document MUST contain a `verificationMethod` entry of type `Multikey` with the public key encoded in Multibase format. Note: `did:jwk` evolves to `did:webvh` in Phase 2 for enhanced discoverability.
 
 ### 2.3 Self-Issuing Credentials
 
 **REQ-CW-020**: The user's agent MUST act as both Issuer and Subject (Holder) of profile credentials. This is the "self-attested credential" pattern defined in W3C VC 2.0.
 
-**REQ-CW-021**: The `issuer` field in self-issued credentials MUST be the user's DID (e.g., `did:web:localhost:agentverse:user`). The `credentialSubject.id` field MUST be the same DID.
+**REQ-CW-021**: The `issuer` field in self-issued credentials MUST be the user's DID (e.g., `did:jwk:eyJrdi...`). The `credentialSubject.id` field MUST be the same DID. The `did:jwk` DID is deterministically derived from the user's BLS12-381 public key (base64url-encoded JWK), requiring no external infrastructure.
 
 **REQ-CW-022**: Self-issued credentials MUST be understood by verifiers as self-attested claims. The system MUST NOT represent self-issued credentials as having third-party authority. The CLI MUST clearly label credentials as "self-attested from conversation history" in any user-facing output.
 
@@ -325,7 +325,7 @@ The `agentverse share` command MUST accept a `--preset` flag (e.g., `agentverse 
     "https://w3id.org/security/data-integrity/v2"
   ],
   "type": "VerifiablePresentation",
-  "holder": "did:web:localhost:agentverse:user",
+  "holder": "did:jwk:eyJrdi...",
   "verifiableCredential": [ /* one or more VCs with derived proofs */ ]
 }
 ```
@@ -361,7 +361,7 @@ The `agentverse share` command MUST accept a `--preset` flag (e.g., `agentverse 
 
 **REQ-VP-023**: To mitigate metadata-based linkability, the system SHOULD:
 - Use standardized credential types with consistent structure (so all users' `AgentverseSkillsCredential` has the same number of signed messages, regardless of how many skills they actually have -- pad with null values up to a fixed maximum).
-- Consider using the `did:web` DID at a shared domain (e.g., `did:web:agentverse.app:users:...`) rather than a per-user unique domain that would trivially link presentations.
+- Use `did:jwk` which is derived from the public key itself, avoiding per-user domain names that would trivially link presentations. Note: since `did:jwk` is deterministic from the key, the issuer DID is still a linkability vector across presentations from the same credential (this is inherent to mandatory disclosure of the issuer field). Pseudonym-based approaches (Phase 2) address this.
 
 ### 4.4 Nonce Handling and Replay Prevention
 
@@ -475,11 +475,11 @@ The `agentverse share` command MUST accept a `--preset` flag (e.g., `agentverse 
   ],
   "id": "urn:uuid:a1b2c3d4-...",
   "type": ["VerifiableCredential", "AgentverseSkillsCredential"],
-  "issuer": "did:web:localhost:agentverse:user",
+  "issuer": "did:jwk:eyJrdi...",
   "issuanceDate": "2026-03-15T12:00:00Z",
   "expirationDate": "2026-06-13T12:00:00Z",
   "credentialSubject": {
-    "id": "did:web:localhost:agentverse:user",
+    "id": "did:jwk:eyJrdi...",
     "skills": [
       {
         "@type": "AgentverseSkill",
@@ -504,7 +504,7 @@ The `agentverse share` command MUST accept a `--preset` flag (e.g., `agentverse 
   "proof": {
     "type": "DataIntegrityProof",
     "cryptosuite": "bbs-2023",
-    "verificationMethod": "did:web:localhost:agentverse:user#bls12-381-key",
+    "verificationMethod": "did:jwk:eyJrdi...#0",
     "proofPurpose": "assertionMethod",
     "proofValue": "u..."
   }
@@ -585,7 +585,7 @@ The end-to-end MVP flow for credentials is:
    agentverse init
    -> Generate BLS12-381 key pair
    -> Create wallet directory structure
-   -> Create did:web DID Document with public key
+   -> Create did:jwk DID Document with public key (self-certifying, no DNS dependency)
    -> User sets passphrase for wallet encryption
 
 2. EXTRACT & ISSUE
@@ -638,7 +638,7 @@ These questions are identified but need not be resolved before implementation be
 
 2. **Document loader strategy**: The custom JSON-LD context (`https://agentverse.app/contexts/profile/v1`) needs a document loader that resolves this URL locally (from a bundled context file) rather than over HTTP. The Digital Bazaar libraries support custom document loaders.
 
-3. **DID:web for localhost**: For MVP, the user's DID is `did:web:localhost:agentverse:user`. This works locally but is not resolvable by remote verifiers. For the MVP demo, the verifier will need the public key provided out-of-band (included in the VP or fetched via A2A). Production DID resolution is a Phase 2 concern.
+3. **DID resolution for did:jwk**: The user's DID uses the `did:jwk` method (e.g., `did:jwk:eyJrdi...`), which is self-certifying and requires no external infrastructure to resolve -- the public key is embedded directly in the DID itself. For MVP, verifiers can resolve the `did:jwk` DID algorithmically (decode the base64url JWK from the DID string) without needing network access or a DID registry. This eliminates the localhost-resolution problem entirely. In Phase 2, the user's DID evolves to `did:webvh` for enhanced discoverability while retaining the self-certifying property.
 
 4. **Performance validation**: Benchmark the Digital Bazaar BBS implementation against REQ-BBS-050 targets early in development. If it is too slow, evaluate the MATTR WASM alternative before building significant integration.
 

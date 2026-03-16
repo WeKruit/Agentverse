@@ -25,18 +25,41 @@
 
 ## 1. Executive Summary
 
-This report presents the architecture for **Agentverse** — a CLI-first system that extracts a user's personal profile from existing LLM conversation history (Claude Code, ChatGPT, etc.) and enables privacy-preserving sharing of that profile with third-party apps and agents.
+This report presents the architecture for **Agentverse** — a system with two complementary layers:
 
-The design is built on **Google's A2A (Agent-to-Agent) protocol** as the communication foundation, extended with four additional security layers that A2A does not provide:
+1. **Agentverse CLI** (TypeScript) — A client-side tool that extracts a user's personal profile from LLM conversation history (Claude Code, ChatGPT, etc.) and enables privacy-preserving sharing via W3C Verifiable Credentials with BBS+ selective disclosure.
+2. **EACP Protocol Layer** (Rust) — The Encrypted Agent Commons Protocol, a 6-layer protocol stack that enables agents to **discover, match, and transact** on behalf of their users without exposing raw personal data. This is where agent-agent connection happens — recruiters finding candidates, cofounders finding each other, dating matches, etc.
 
-| Layer | What It Solves | Key Technology |
-|-------|---------------|----------------|
-| **Privacy** | Share attributes without exposing raw data | W3C Verifiable Credentials + BBS+ signatures → ZKP circuits (Noir) |
-| **Prompt Injection Defense** | Prevent agents from manipulating each other | CaMeL capability model + Dual LLM pattern + structured data separation |
-| **Trust & Identity** | Know who you're talking to, verify agents | DIDs + Agent Cards with mandatory signing + progressive trust (ATF) |
-| **Authorization & Consent** | User stays in control of what's shared | OAuth 2.1 with agent extensions + ABAC + purpose-bound tokens |
+The Agentverse CLI is the **user-facing product**. EACP is the **underlying protocol** that governs how agents find each other and compute matches inside privacy-preserving clean rooms.
 
-The core design philosophy — learned from OpenClaw's catastrophic security failures — is: **push encrypted context out to apps, never pull agents into your data**.
+### Two-Layer Architecture
+
+| Layer | What It Is | Language | Key Technology |
+|-------|-----------|----------|----------------|
+| **Agentverse CLI** | Client-side tool: profile extraction, credential wallet, consent, sharing | TypeScript | BBS+ VCs, A2A protocol, Commander.js |
+| **EACP L0: Transport** | P2P mesh, hybrid PQ TLS, MLS session encryption | Rust | libp2p, OpenMLS (RFC 9420), aws-lc-rs |
+| **EACP L1: Identity** | Self-certifying DIDs, transparency log, registry | Rust | did:jwk → did:webvh, Tessera, ed25519-dalek |
+| **EACP L2: Discovery** | Privacy-preserving agent search (pre-filter → HNSW in TEE → PSI) | Rust | voprf, HNSW, Nitro SDK |
+| **EACP L3: Compute** | TEE clean rooms for encrypted matching | Rust | AWS Nitro Enclaves, vsock, KMS |
+| **EACP L4: Output** | BBS+ selective disclosure, ZK match proofs, TEE attestation | Rust | BBS+ (W3C), ed25519-dalek |
+| **EACP L5: Tokens** | Reputation, match receipts, venue stakes | Rust | Pedersen commitments, Tessera |
+
+The core design philosophy — learned from OpenClaw's catastrophic security failures — is: **push encrypted context out to apps, never pull agents into your data**. And the key architectural insight: **the best defense against data leakage is to never give the agent the sensitive data in the first place** (context minimization).
+
+### Agent-Agent Discovery: The Missing Piece
+
+Current agent protocols (A2A, MCP) support agent communication but not agent *discovery*. The use cases that matter — recruiting, dating, cofounder search — require agents to **find each other** based on encrypted attributes without exposing raw profiles. This is EACP Layers 2-3:
+
+```
+Current state:  User manually picks who to share with
+                agentverse share --with ditto.ai
+
+EACP vision:    Agents find each other via encrypted search
+                "Find candidates with 5+ years Rust, open to startups"
+                ...computed inside a TEE clean room, no one sees raw profiles
+```
+
+See [encrypted-agent-commons-whitepaper.md](encrypted-agent-commons-whitepaper.md) for the full EACP specification and [protocol-research-synthesis.md](protocol-research-synthesis.md) for the research validation.
 
 ---
 
@@ -145,7 +168,7 @@ OpenClaw's catastrophic failure (25,000 GitHub stars in one day → 135,000 expo
 
 > **The best way to prevent data leakage is to never give the agent the sensitive data in the first place.**
 
-This principle — drawn from IsolateGPT (NDSS 2025), CaMeL (Google DeepMind), FIDES (Microsoft), and Apple Private Cloud Compute — drives the entire architecture. Rather than one Guardian Agent with full profile access, we use **context-scoped ephemeral instances** where each interaction gets only the minimum data it needs.
+This principle — drawn from IsolateGPT (NDSS 2025), CaMeL (Google DeepMind), FIDES (Microsoft), and Apple Private Cloud Compute — drives the entire architecture. Rather than a single agent process with full profile access, we use **data-scoped sharing pipelines** where each interaction gets only the minimum data it needs.
 
 ### System Overview
 
@@ -200,11 +223,11 @@ This principle — drawn from IsolateGPT (NDSS 2025), CaMeL (Google DeepMind), F
 │                        THIRD-PARTY AGENTS                                 │
 │                                                                          │
 │  Agent Card includes:                                                    │
-│    - keyAgreement: X25519 public key (for age encryption)                │
+│    - keyAgreement: X25519 public key (Phase 2: sign-then-encrypt)        │
 │    - DID, JWS signature, privacy policy, skills                          │
 │                                                                          │
 │  Receives ONLY:                                                          │
-│    - age-encrypted VP (selective disclosure)                              │
+│    - VP with selective disclosure (HTTPS in MVP; E2E in Phase 2)          │
 │    - Scoped token (purpose-bound, time-limited)                          │
 │    - Cannot see A2A envelope content beyond routing metadata              │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -266,8 +289,8 @@ This is inspired by:
 5. SCOPED INSTANCE (isolated context with only 3 attributes):
    ├── Generates VP with BBS+ selective disclosure (only approved claims)
    ├── Signs plaintext VP with JWS
-   ├── Encrypts VP payload with Ditto's X25519 key (age encryption)
-   ├── Sends A2A SendMessage: encrypted VP as DataPart
+   ├── Sends A2A SendMessage: VP as DataPart over HTTPS (Phase 2: sign-then-encrypt)
+   ├── Transport security: TLS 1.2+ (MVP); DIDComm v2 authcrypt (Phase 2)
    └── Instance is DESTROYED — no residual context
 
 6. Ditto's agent:
@@ -429,7 +452,7 @@ This is the **strongest** defense and the foundation of the entire security arch
 │         │  6. Instance DESTROYED — zero residual context            │
 └─────────┼───────────────────────────────────────────────────────────┘
           ▼
-   A2A SendMessage (age-encrypted DataPart)
+   A2A SendMessage (DataPart over HTTPS)
 ```
 
 ### 7.2 P2P Security (Outsiders Can't Listen In)
@@ -440,12 +463,14 @@ A2A mandates TLS but provides **no message-level encryption**. If TLS terminates
 
 | Phase | Protocol | Properties | Use Case |
 |-------|----------|-----------|----------|
-| **MVP** | **age X25519** encryption | E2E confidentiality, ephemeral keys per message, post-quantum option (`age1pq1...`) | One-shot VP sharing with any agent |
+| **MVP** | **HTTPS/TLS 1.2+** | Transport encryption, industry standard | All MVP communication |
+| **Phase 2** | **DIDComm v2 authcrypt** (sign-then-encrypt) | Sender authentication + confidentiality, DIF standard | E2E encrypted agent communication |
+| **Phase 2** | **MLS (RFC 9420)** | O(log N) group key ops, forward secrecy, post-compromise security | Multi-agent sessions, EACP transport |
 | **Phase 2** | **Noise IK/XX** handshake | Mutual authentication, forward secrecy, session continuity | Repeated communication with trusted agents |
-| **Phase 2** | **DIDComm v2 authcrypt** | DIF standard, mediator routing, sender authentication | Standards-compliant E2E channels |
-| **Phase 3** | **MLS (RFC 9420)** | O(log N) group key ops, forward secrecy, post-compromise security | Multi-agent group communication |
 
-**MVP implementation — age-encrypted Data Parts**:
+> **Note:** age E2E encryption was evaluated for MVP but deferred to Phase 2 after adversarial review found it provides confidentiality but no sender authentication (Critical gap). Phase 2 implements sign-then-encrypt via DIDComm v2 authcrypt. The design below shows the Phase 2 target architecture.
+
+**Phase 2 target — E2E encrypted Data Parts**:
 
 ```
 A2A Message (envelope in plaintext for routing):
@@ -637,7 +662,7 @@ We adopt the emerging IETF standards for agent authorization:
 
 ```json
 {
-  "iss": "did:web:user.agentverse.local",
+  "iss": "did:jwk:&lt;user-key&gt;",
   "sub": "did:web:ditto.ai:agent",
   "aud": "https://ditto.ai/a2a",
   "iat": 1710489600,
@@ -645,7 +670,7 @@ We adopt the emerging IETF standards for agent authorization:
   "scope": "profile:read:interests,age_range,location_city",
   "purpose": "dating-profile",
   "purpose_binding": true,
-  "delegator": "did:web:user.agentverse.local",
+  "delegator": "did:jwk:&lt;user-key&gt;",
   "actor": "did:web:ditto.ai:agent",
   "constraints": {
     "max_requests": 100,
@@ -767,62 +792,97 @@ Each interaction with a different third-party agent runs in a separate sandbox i
 
 ---
 
-## 11. MVP Implementation Roadmap
+## 11. Implementation Roadmap — Unified 4-Phase Plan
 
-### Phase 1: Core Profile + BBS+ Selective Disclosure (Weeks 1–6)
+### How Agentverse CLI and EACP Fit Together
 
-**Goal**: Extract profile from LLM history, issue VCs, share via A2A with selective disclosure.
+```
+Phase 1 (Weeks 1-6):     Agentverse CLI — the client product
+Phase 2 (Weeks 7-14):    EACP L0-L1 — protocol foundation (transport, identity)
+Phase 3 (Weeks 15-22):   EACP L2-L3 — agent discovery & matching (the big unlock)
+Phase 4 (Weeks 23-30):   EACP L4-L5 — reputation, tokens, ecosystem
+```
+
+### Phase 1: Agentverse CLI — Client MVP (Weeks 1–6)
+
+**Goal**: Extract profile from LLM history, issue BBS+ VCs, share via A2A with selective disclosure.
 
 | Component | What to Build | Tech Stack |
 |-----------|--------------|-----------|
 | CLI tool | `agentverse` command-line interface | TypeScript, Commander.js |
-| Profile Extractor | Parse Claude Code JSONL, ChatGPT export JSON → structured profile | TypeScript, Zod schema validation |
-| Credential Wallet | Issue BBS+ signed VCs over profile attributes | `@mattrglobal/bbs-signatures`, `jsonld-signatures-bbs` |
-| Privacy Engine (v1) | Generate Verifiable Presentations with selective disclosure | W3C VC Data Integrity |
-| A2A Client | Agent Card discovery, SendMessage, basic task lifecycle | HTTP client, JSON-RPC 2.0 |
-| Consent Manager (v1) | Simple approve/deny per request, audit log | YAML policy files |
+| Profile Extractor | Parse Claude Code JSONL + ChatGPT JSON → structured profile | TypeScript, Zod, stream-json |
+| Credential Wallet | Issue BBS+ signed VCs over profile attributes | `@digitalbazaar/bbs-2023-cryptosuite`, `@digitalbazaar/vc` |
+| VP Generation | Selective disclosure with preset profiles (minimal/professional/full) | W3C VC Data Integrity, BBS+ derived proofs |
+| A2A Client | Agent Card discovery, JWS verification, SendMessage | jose, did-resolver, fetch |
+| Consent Manager (v1) | Interactive CLI consent, JSON policies, append-only audit log | JSON, Node.js crypto |
+| Mock Agent | Test/demo agent for end-to-end flow | Express/Fastify (100-200 LOC) |
 
-**Security baseline for Phase 1**:
-- Mandatory Agent Card JWS verification
-- Structured `data` Parts only (no free-text processing)
-- All communication over HTTPS
-- Local audit log of all sharing events
+**Identity**: `did:jwk` for user identity (no DNS dependency, EACP-compatible). Third-party agents use `did:web`.
 
-### Phase 2: ZKP Predicates + Prompt Injection Defense (Weeks 7–12)
+**Security baseline**: Two-Pillar Defense (Data Minimization + Structured Data Only), mandatory JWS verification, HTTPS-only, profile encrypted at rest, self-issued credentials labeled "self-attested."
 
-**Goal**: Add ZK proof generation for attribute predicates, implement CaMeL-style defense.
+**VC schema**: Designed for EACP compatibility — categories map to EACP context pack fields.
 
-| Component | What to Build | Tech Stack |
-|-----------|--------------|-----------|
-| ZKP Engine | Noir circuits for common predicates (range proofs, set membership, threshold comparisons) | Noir, Barretenberg backend |
-| Dual LLM Defense | Trusted/quarantined LLM split, capability enforcer | Process-level isolation |
-| Agent Card Extensions | DID anchoring, privacy policy declaration, attestation fields | `did:web` method, JWS |
-| Consent Manager (v2) | ABAC policies, purpose-binding, time-limited tokens | OPA/Rego policy engine |
-| Trust Store | Progressive trust tracking, interaction history | SQLite (local) |
+### Phase 2: EACP Protocol Foundation (Weeks 7–14)
 
-### Phase 3: Advanced Privacy + Ecosystem (Weeks 13–20)
-
-**Goal**: Encrypted computation, agent reputation, ecosystem growth.
+**Goal**: Build the protocol transport and identity layer. Upgrade from A2A-over-HTTPS to proper PQ-encrypted sessions.
 
 | Component | What to Build | Tech Stack |
 |-----------|--------------|-----------|
-| MPC Engine | 2-party computation for compatibility scoring | CrypTen (PyTorch) |
-| FHE Engine (experimental) | Simple encrypted computations on profile vectors | Concrete ML (Zama) |
-| Reputation System | On-chain attestations for agent behavior | ERC-8004 or similar |
-| Sandbox | gVisor-based isolation for quarantined LLM | gVisor, cgroups v2 |
-| Agent SDK | SDK for third-party agents to integrate with Agentverse | TypeScript/Python |
+| PQXDH handshake | Custom from spec: 4 DH + 1 ML-KEM-768 | ml-kem, x25519-dalek, ed25519-dalek (Rust) |
+| MLS sessions | Session encryption with X-Wing ciphersuite | OpenMLS 0.7.2 (Apache-2.0) |
+| Sign-then-encrypt | DIDComm v2 authcrypt (sender auth + confidentiality) | ECDH-1PU + AES-256-GCM |
+| Identity registry | DID registration, key rotation, revocation | did:jwk genesis → did:webvh operational |
+| Transparency log | Tessera personality for key bindings and sharing events | Trillian Tessera v1.0.2 (Go) |
+| Injection firewall | Schema enforcement + quarantine + audit (layers 1, 3, 5) | Rust, Zod schema validation |
+| CaMeL defense | Dual LLM pattern for bidirectional agent communication | Process-level isolation |
+| `agentverse discover` | CLI command stub connecting to EACP registry | TypeScript → Rust FFI |
 
-### Key Design Decisions for MVP
+**Key upgrade**: E2E encryption via sign-then-encrypt (not bare age). MLS provides forward secrecy and post-compromise security.
+
+### Phase 3: Agent Discovery & Encrypted Matching (Weeks 15–22)
+
+**Goal**: The big unlock — agents find each other for recruiting, dating, cofounder search, etc.
+
+| Component | What to Build | Tech Stack |
+|-----------|--------------|-----------|
+| Pre-filter search | Inverted indexes over Agent Card fields (15 indexed fields, <5ms) | Rust |
+| HNSW in TEE | Vector search inside AWS Nitro Enclave (384-dim embeddings, 10-30ms) | HNSW, Nitro SDK |
+| PSI eligibility | DH-based Private Set Intersection for hard-constraint matching | voprf crate (RFC 9497) |
+| TEE clean rooms | Nitro Enclaves with KMS key release (PCR0+PCR3+PCR8) | Nitro SDK, vsock, aws-lc-rs |
+| Venue SDK | SDK for venue operators (WeKruit, Ditto AI) to build matching logic | Rust + TypeScript bindings |
+| `agentverse discover` | Full agent discovery via encrypted search | TypeScript CLI → EACP L2 |
+| `agentverse match` | Accept/reject match proposals, view match receipts | TypeScript CLI → EACP L3-L4 |
+
+**This is the product differentiator**: No other protocol enables agents to find each other based on encrypted attributes, compute compatibility inside TEE clean rooms, and exchange verifiable match receipts — all without any party seeing raw profile data.
+
+### Phase 4: Reputation, Tokens & Ecosystem (Weeks 23–30)
+
+**Goal**: Build the trust and incentive layer that makes the ecosystem self-sustaining.
+
+| Component | What to Build | Tech Stack |
+|-----------|--------------|-----------|
+| Match tokens | Pedersen commitment-based match receipts, Tessera-anchored | curve25519-dalek, Tessera |
+| Reputation engine | 9-component weighted formula + PageRank for Sybil resistance | Rust |
+| Venue stakes | Collateral-backed venue accountability with slashing conditions | Tessera + governance panel |
+| BBS+ V2 | Unlinkable proofs, ZK range predicates | BBS+ (IETF draft), Noir circuits |
+| Multi-cloud TEE | SEV-SNP (Azure), TDX (GCP) alongside Nitro | TEE abstraction layer |
+| Witness network | OmniWitness with 3-of-5 cosigning quorum | OmniWitness (Go) |
+| Agent SDK | SDK for third-party agents to integrate with EACP | Rust + TypeScript + Python |
+
+### Key Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Start with BBS+ VCs, not ZKPs** | Phase 1 | BBS+ is standardized, sub-ms verification, no circuit development; ZKPs add predicates in Phase 2 |
-| **Structured data only, no free text** | All phases | Eliminates the primary prompt injection vector — instruction/data separation |
-| **Mandatory Agent Card signing** | Phase 1 | Prevents spoofing from day one; unsigned cards are rejected |
-| **gVisor over Firecracker** | Phase 3 | Better for CLI tool on user machines; lower overhead |
-| **MPC before FHE** | Phase 3 | MPC has lower latency for interactive computation today |
-| **did:web over blockchain DIDs** | Phase 1 | Simple, DNS-based, no blockchain dependency; can migrate later |
+| **Two-product architecture** | Agentverse CLI (TS) + EACP Protocol (Rust) | CLI is the user product; EACP is the protocol layer. Different languages for different concerns. |
+| **Start with BBS+ VCs, not ZKPs** | Phase 1 | BBS+ is standardized, sub-ms verification; ZKPs add predicates in Phase 4 |
+| **did:jwk over did:web** | Phase 1 | Self-certifying, no DNS dependency, EACP-compatible; evolves to did:webvh in Phase 2 |
+| **MLS over Signal Double Ratchet** | Phase 2 | Apache-2.0 license (Signal is AGPL), native multi-device, IETF standardized (RFC 9420) |
+| **TEE search over crypto search** | Phase 3 | No open system achieves sub-100ms encrypted vector search; standard HNSW inside Nitro is the only viable MVP path |
+| **Tessera over blockchain** | Phase 2 | Same auditability, no consensus overhead, $1,700/yr vs $100K+ for zkRollup |
+| **Structured data only, no free text** | All phases | Eliminates the primary prompt injection vector |
 | **Local-first architecture** | All phases | Profile and credentials never leave user's machine unless explicitly shared |
+| **Context minimization as primary defense** | All phases | Agents should never have data they don't need — the best defense against leakage |
 
 ---
 

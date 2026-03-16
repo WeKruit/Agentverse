@@ -10,7 +10,16 @@
 
 Users have spent hundreds of hours in LLM conversations that implicitly contain a rich personal profile (skills, interests, values, career context). This profile is trapped, not portable, not privacy-preserving, and not verifiable. Agentverse extracts this profile and enables privacy-preserving sharing with third-party agents via Google's A2A protocol.
 
-**Core design philosophy**: Push encrypted context out to apps. Never pull agents into your data.
+**Core design philosophy**: Push encrypted context out to apps. Never pull agents into your data. Agents should never have data they don't need.
+
+**This MVP is Phase 1 of a 4-phase plan**. Agentverse CLI is the client-side product; the Encrypted Agent Commons Protocol (EACP) is the underlying protocol for agent-agent discovery and matching. See [RESEARCH_REPORT.md](RESEARCH_REPORT.md) for the full unified architecture and [encrypted-agent-commons-whitepaper.md](encrypted-agent-commons-whitepaper.md) for the EACP specification.
+
+| Phase | What | Timeline |
+|-------|------|----------|
+| **Phase 1: Agentverse CLI** | Extract, issue VCs, push-share (this document) | Weeks 1-6 |
+| **Phase 2: EACP Foundation** | PQ transport, MLS sessions, identity registry, Tessera log | Weeks 7-14 |
+| **Phase 3: Discovery & Matching** | Encrypted agent search, TEE clean rooms, PSI gates | Weeks 15-22 |
+| **Phase 4: Ecosystem** | Reputation, tokens, multi-venue, agent SDK | Weeks 23-30 |
 
 ---
 
@@ -45,8 +54,6 @@ Users have spent hundreds of hours in LLM conversations that implicitly contain 
 | MPC/FHE computation | 3 | Requires Phase 2 infrastructure |
 | On-chain reputation (ERC-8004) | 3 | Requires ecosystem maturity |
 | Agent SDK for third parties | 3 | Requires stable protocol |
-| Key rotation protocol | 2 | MVP: single key pair, manual re-keying |
-| Revocation registry | 2 | MVP: short-lived credentials (90-day TTL) |
 
 ---
 
@@ -72,7 +79,11 @@ agentverse agents                  # List known agents and their trust status
 agentverse agents inspect <domain> # Fetch and display Agent Card details
 agentverse audit                   # Show sharing audit log
 agentverse audit --agent <domain>  # Filter audit log by agent
+agentverse discover                # [Phase 3 stub] Find matching agents via EACP
+agentverse match                   # [Phase 3 stub] View and respond to match proposals
 ```
+
+> **Phase 3 stubs**: `agentverse discover` and `agentverse match` are placeholder commands that display "Coming in Phase 3 — encrypted agent discovery via the EACP protocol" with a link to the whitepaper. They signal the product vision and reserve the command namespace.
 
 ---
 
@@ -86,7 +97,7 @@ agentverse audit --agent <domain>  # Filter audit log by agent
 - Streaming read (line-by-line, never load full file)
 - Reconstruct threads via `parentUuid` chains
 - Extract user messages only; use assistant messages for context
-- Use `cwd` and `gitBranch` as weak skill signals
+- Use `cwd` and `gitBranch` as weak skill signal
 
 **ChatGPT Export (P0)**:
 - Location: User-provided path to `conversations.json` from data export ZIP
@@ -99,7 +110,7 @@ agentverse audit --agent <domain>  # Filter audit log by agent
 
 ### 4.2 Profile Schema
 
-Six attribute categories, each becoming a separate VC:
+Six attribute categories, each becoming a separate VC. These categories are designed to map to EACP context pack fields for forward compatibility (see [encrypted-agent-commons-whitepaper.md](encrypted-agent-commons-whitepaper.md) Section 6.4 for the Mem0 category mapping):
 
 | Category | Key Attributes | Sensitivity |
 |----------|---------------|-------------|
@@ -191,7 +202,8 @@ Time-decay: -0.05 per 90 days since lastSeen (rates vary by category: role/locat
 - **Mandatory JWS verification**: Unsigned or invalid-signature cards are rejected with clear error
 - Schema validation via Zod (required fields: `name`, `interfaces`, `capabilities`, `securitySchemes`, `security`)
 - Cache with 1-hour TTL, 24-hour max; conditional requests via ETag
-- `did:web` resolution for DID verification: `did:web:<domain>` → `https://<domain>/.well-known/did.json`
+- **User identity**: `did:jwk` (self-certifying, no DNS dependency, EACP-compatible). Evolves to `did:webvh` in Phase 2.
+- **Third-party agent identity**: `did:web` resolution: `did:web:<domain>` → `https://<domain>/.well-known/did.json`
 - SSRF prevention: reject private/loopback endpoint URLs
 
 **Technology**: `jose` v6.x (JWS operations, ES256 + EdDSA), `did-resolver` + `web-did-resolver` (DID resolution), built-in `fetch` (HTTP).
@@ -221,20 +233,26 @@ Since MVP is push-only (user's agent sends VPs outbound, doesn't process complex
 
 Location: `~/.agentverse/policies/`
 
-```yaml
-# ~/.agentverse/policies/_default.yaml
-# Default: deny everything
-default: deny
+```json
+// ~/.agentverse/policies/_default.json
+// Default: deny everything
+{
+  "default": "deny"
+}
 
-# ~/.agentverse/policies/ditto-ai.yaml
-agent: "ditto.ai"
-purpose: "dating-profile"
-allow:
-  attributes: [interests, age_range, location_city]
-constraints:
-  duration: 30d
-  max_requests: 100
-  third_party_sharing: false
+// ~/.agentverse/policies/ditto-ai.json
+{
+  "agent": "ditto.ai",
+  "purpose": "dating-profile",
+  "allow": {
+    "attributes": ["interests", "age_range", "location_city"]
+  },
+  "constraints": {
+    "duration": "30d",
+    "max_requests": 100,
+    "third_party_sharing": false
+  }
+}
 ```
 
 ### 7.2 Interactive Consent
@@ -374,7 +392,6 @@ When no pre-authorized policy matches, display:
 | **Streaming JSON** | stream-json | latest | Large ChatGPT export parsing |
 | **Encryption at rest** | Node.js crypto (AES-256-GCM) | — | Key + profile storage encryption |
 | **Key derivation** | argon2 (npm) | latest | Passphrase → encryption key |
-| **Config files** | yaml (npm) | latest | Policy file parsing |
 
 ---
 
@@ -395,14 +412,14 @@ When no pre-authorized policy matches, display:
 │   ├── career.vc.json
 │   └── demographics.vc.json # Only if user opted in
 ├── policies/
-│   ├── _default.yaml        # Default deny-all policy
-│   └── <domain>.yaml        # Per-agent pre-authorized policies
+│   ├── _default.json        # Default deny-all policy
+│   └── <domain>.json        # Per-agent pre-authorized policies
 ├── agents/
 │   └── <domain>.card.json   # Cached Agent Cards with TTL metadata
 ├── audit/
 │   └── sharing.log          # Append-only JSONL audit trail
 └── did/
-    └── did.json             # User's DID Document (did:web:localhost)
+    └── did.json             # User's DID Document (did:jwk — self-certifying, no hosting needed)
 ```
 
 All files created with `0600` permissions.
@@ -458,10 +475,9 @@ Before any other code is written, prove the crypto works:
 | Claude Code JSONL format changes | Low | Medium | Version-detect via `version` field; pluggable parser architecture |
 | A2A v1.0 spec changes before stabilization | Low | Medium | Isolate A2A client behind interface; track spec repo |
 | LLM extraction accuracy too low | Medium | Medium | Mandatory user review; confidence thresholds; iterative prompt refinement |
-| did:web requires HTTPS hosting for user's DID | Medium | Low | MVP: use localhost DID for development; document production hosting requirement |
+| did:jwk not resolvable by verifiers without out-of-band key | Low | Low | Embed public key inline in VP verificationMethod (W3C VC 2.0 supports this); Phase 2 migrates to did:webvh |
 | Performance: BBS+ proof generation too slow in pure JS | Medium | Medium | Benchmark early; MATTR WASM fallback ready |
-| age encryption library maturity in JS/TS | Low | Medium | age spec is simple; sodium-native as fallback for X25519+ChaCha20 |
-| Scoped instance isolation on user's machine | Medium | Medium | Process-level isolation in MVP; gVisor in Phase 3 |
+| Scoped instance isolation on user's machine | Medium | Medium | In-process data scoping via module architecture in MVP; --experimental-permission enforcement in Phase 2; gVisor in Phase 3 |
 | User doesn't have LLM API key for extraction | Low | Low | Support Ollama for local inference; document API key setup |
 
 ---
