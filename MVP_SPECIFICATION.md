@@ -81,9 +81,23 @@ agentverse audit                   # Show sharing audit log
 agentverse audit --agent <domain>  # Filter audit log by agent
 agentverse discover                # [Phase 3 stub] Find matching agents via EACP
 agentverse match                   # [Phase 3 stub] View and respond to match proposals
+agentverse contacts                # [Phase 2 stub] Manage relationship records
+agentverse persona create          # [Phase 2 stub] Create anonymous persona for venue
 ```
 
-> **Phase 3 stubs**: `agentverse discover` and `agentverse match` are placeholder commands that display "Coming in Phase 3 — encrypted agent discovery via the EACP protocol" with a link to the whitepaper. They signal the product vision and reserve the command namespace.
+> **Phase 2-3 stubs**: `discover`, `match`, `contacts`, and `persona` are placeholder commands that reserve the command namespace for the delegate agent model and EACP protocol. They display a message pointing to the relevant docs.
+
+### 3.2 Phase 1 Foundations for Bidirectional Communication
+
+Phase 1 is push-only, but we design for forward compatibility with the delegate agent model (Phase 2+):
+
+- **VCs are issued with the issuer DID as a parameter** — not hardcoded. This enables persona-specific VCs (ephemeral did:jwk per persona) in Phase 2
+- **The wallet supports multiple key pairs** — keyed by purpose/persona ID. Phase 1 uses a single key pair; Phase 2 adds per-persona HKDF-derived keys
+- **The consent system tracks purpose per interaction** — the `direct-contact.json` policy schema is designed now (even though only `share --with` uses it in Phase 1)
+- **The A2A client separates message assembly from transport** — so Phase 2 can swap HTTPS for MLS without rewriting VP generation
+- **The extraction pipeline includes a coarsening step** — attributes are classified into 4 tiers (Tier 0: bucket category, Tier 1: coarsened for matching, Tier 2: specific skills, Tier 3: identifying details, Tier 4: PII). BBS+ VCs are issued per-tier so selective disclosure aligns with progressive revelation
+- **The profile schema uses typed numeric fields** where applicable (experienceYears as integer, not string) — forward-compatible with Phase 4 ZK range predicates
+- **The CLI command namespace reserves** `contacts`, `persona`, `discover`, `match`, `distill`, `publish` — preventing naming conflicts when these features ship
 
 ---
 
@@ -123,19 +137,30 @@ Six attribute categories, each becoming a separate VC. These categories are desi
 
 Every attribute carries metadata: `confidence` (0.0–1.0), `sources` (sessionId + messageUuid), `firstSeen`/`lastSeen`, `extractionMethod` (explicit/inferred/behavioral), `userVerified`, `sensitivity`.
 
-### 4.3 Extraction Pipeline
+### 4.3 Extraction & Distillation Pipeline
 
 ```
-Parse & Normalize → Chunk & Sample → LLM Extraction → Aggregate & Dedupe → User Review
+Parse & Normalize → Redact → Chunk & Sample → LLM Extraction → Aggregate & Dedupe → Classify & Coarsen → User Review
 ```
 
 1. **Parse**: All parsers produce `NormalizedConversation` format
-2. **Chunk**: ~8K token chunks; for >1000 conversations, stratified sampling (100% last 30d, 50% 30–180d, 20% 180d+)
-3. **Extract**: LLM with structured output; user's own API key or local (Ollama); per-attribute confidence + evidence citation
-4. **Aggregate**: Merge duplicates (highest confidence, most specific value, latest timestamp); detect and flag conflicts
-5. **Review**: Mandatory for `sensitivity: "high"` attributes; user can confirm/edit/delete/flag
+2. **Redact**: Pre-processing redaction filter strips API keys, passwords, PII patterns (multi-layer: regex + spaCy NER + Presidio) before LLM extraction
+3. **Chunk**: ~8K token chunks; for >1000 conversations, stratified sampling (100% last 30d, 50% 30–180d, 20% 180d+)
+4. **Extract**: LLM with structured output; user's own API key or local (Ollama); per-attribute confidence + evidence citation
+5. **Aggregate**: Merge duplicates (highest confidence, most specific value, latest timestamp); detect and flag conflicts
+6. **Classify & Coarsen**: Each attribute is assigned a revelation tier and coarsened for matching:
 
-**Privacy**: Pre-processing redaction filter strips API keys, passwords, PII before LLM extraction. Profile never contains raw conversation text. Remote API usage requires explicit confirmation.
+| Tier | What Goes Here | Coarsening Rule | k-Anonymity Target |
+|------|---------------|----------------|-------------------|
+| **Tier 0** | Bucket category ("job-seeking") | Category label only | k > 100,000 |
+| **Tier 1** | Role category, experience band, location region | "Stripe" → "FAANG-tier fintech", "7 years" → "5-10 years" | k > 1,000 |
+| **Tier 2** | Specific skills, domain, education level | Revealed post-initial-match-score | k > 50 |
+| **Tier 3** | Company name, school, specific projects | Revealed post-mutual-interest | k > 5 |
+| **Tier 4** | Full name, email, phone (PII vault) | BBS+ selective disclosure only | k = 1 |
+
+7. **Review**: Mandatory for `sensitivity: "high"` attributes; user can confirm/edit/delete/flag. Two-column view: Included (exchange info) | Excluded (PII vault)
+
+**Privacy**: Profile never contains raw conversation text. Remote API usage requires explicit confirmation (`--confirm-remote`). PII vault is encrypted with user master key and never enters the commons.
 
 **Performance targets**: Full extraction of 1000 conversations < 10 min (excluding LLM latency). Incremental update of 50 conversations < 30s. Memory cap: 512 MB.
 
@@ -399,30 +424,63 @@ When no pre-authorized policy matches, display:
 
 ```
 ~/.agentverse/
+├── config.toml                    # Global configuration
+├── profile.json.enc               # Extracted profile (AES-256-GCM encrypted at rest)
+├── profile.md                     # Human-readable profile view (gitignored, regenerated)
+├── extraction-state.json          # Tracks last-processed timestamp per source
+│
 ├── keys/
-│   ├── private.key.enc     # AES-256-GCM encrypted BLS12-381 private key
-│   └── public.key          # BLS12-381 public key (also in DID Document)
-├── profile.json             # Extracted profile (pre-VC structured data)
-├── extraction-state.json    # Tracks last-processed timestamp per source
-├── credentials/
-│   ├── skills.vc.json       # BBS+ signed VC for skills
-│   ├── interests.vc.json    # BBS+ signed VC for interests
-│   ├── communication.vc.json
-│   ├── values.vc.json
-│   ├── career.vc.json
-│   └── demographics.vc.json # Only if user opted in
+│   ├── master.key.enc             # AES-256-GCM encrypted BLS12-381 master key
+│   ├── master.pub                 # BLS12-381 public key
+│   ├── agent-signing.jwk.enc      # Ed25519 key for Agent Card JWS
+│   └── recovery.key               # Emergency recovery key (exported on init)
+│
+├── agents/                        # Distilled agents (one per bucket/purpose)
+│   ├── recruiting.json            # Recruiting-context distilled agent
+│   ├── recruiting.key.enc         # HKDF-derived agent-specific key (encrypted)
+│   ├── dating.json                # Dating-context distilled agent
+│   ├── dating.key.enc
+│   └── ...
+│
+├── credentials/                   # BBS+ signed VCs (per-tier)
+│   ├── tier1-skills.vc.json       # Coarsened skills (k>1000)
+│   ├── tier2-skills.vc.json       # Specific skills (k>50)
+│   ├── tier3-career.vc.json       # Identifying career details (k>5)
+│   └── tier4-pii.vc.json          # PII vault (BBS+ signed, never leaves device)
+│
+├── venues/                        # Venue connection state
+│   ├── wekruit/
+│   │   ├── attestation.json       # Venue's TEE attestation certificate
+│   │   ├── config.toml            # Venue-specific overrides
+│   │   └── published.json         # What's currently published to this venue
+│   └── ...
+│
+├── matches/                       # Match results and receipts
+│   ├── active/                    # Current matches awaiting action
+│   ├── completed/                 # Matches where reveal happened
+│   └── receipts/                  # Cryptographic match receipts
+│
 ├── policies/
-│   ├── _default.json        # Default deny-all policy
-│   └── <domain>.json        # Per-agent pre-authorized policies
-├── agents/
-│   └── <domain>.card.json   # Cached Agent Cards with TTL metadata
+│   ├── _default.json              # Default deny-all policy
+│   ├── direct-contact.json        # Purpose-based contact request policy
+│   └── <domain>.json              # Per-agent pre-authorized policies
+│
+├── cache/
+│   ├── agent-cards/               # Cached Agent Cards with TTL
+│   ├── did-documents/             # Cached DID Documents
+│   └── extraction/                # Temp extraction artifacts (auto-purge 24h)
+│
 ├── audit/
-│   └── sharing.log          # Append-only JSONL audit trail
+│   └── sharing.log                # Hash-chained append-only JSONL audit trail
+│
+├── relationships/                 # Persistent relationship records (structured, not raw conversation)
+│   └── <peer-did-hash>.json
+│
 └── did/
-    └── did.json             # User's DID Document (did:jwk — self-certifying, no hosting needed)
+    └── did.json                   # User's DID Document (did:jwk)
 ```
 
-All files created with `0600` permissions.
+All files created with `0600` permissions. Per-agent keys are HKDF-derived from master key + bucket_id, ensuring cross-bucket unlinkability.
 
 ---
 

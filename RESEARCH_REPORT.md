@@ -39,27 +39,68 @@ The Agentverse CLI is the **user-facing product**. EACP is the **underlying prot
 | **Agentverse CLI** | Client-side tool: profile extraction, credential wallet, consent, sharing | TypeScript | BBS+ VCs, A2A protocol, Commander.js |
 | **EACP L0: Transport** | P2P mesh, hybrid PQ TLS, MLS session encryption | Rust | libp2p, OpenMLS (RFC 9420), aws-lc-rs |
 | **EACP L1: Identity** | Self-certifying DIDs, transparency log, registry | Rust | did:jwk → did:webvh, Tessera, ed25519-dalek |
-| **EACP L2: Discovery** | Privacy-preserving agent search (pre-filter → HNSW in TEE → PSI) | Rust | voprf, HNSW, Nitro SDK |
-| **EACP L3: Compute** | TEE clean rooms for encrypted matching | Rust | AWS Nitro Enclaves, vsock, KMS |
-| **EACP L4: Output** | BBS+ selective disclosure, ZK match proofs, TEE attestation | Rust | BBS+ (W3C), ed25519-dalek |
-| **EACP L5: Tokens** | Reputation, match receipts, venue stakes | Rust | Pedersen commitments, Tessera |
+| **EACP L1.5: Distillation** | Extract → classify (PII vs exchange) → coarsen → assemble distilled agent. PII never enters the commons. | Rust + TS | Multi-layer PII detection, k-anonymity coarsening, 5-layer injection firewall |
+| **EACP L2: Discovery** | Bucket-based agent search (pre-filter → HNSW in TEE → PSI) within purpose-specific namespaces | Rust | voprf, HNSW, Nitro SDK |
+| **EACP L3: Compute** | TEE clean rooms matching on **exchange info only** (no PII in TEE) | Rust | AWS Nitro Enclaves, vsock, KMS |
+| **EACP L4: Output** | Match receipts, TEE attestation, Tessera transparency log | Rust | ed25519-dalek, Tessera |
+| **EACP L4.5: Consent Gate** | Human-in-the-loop PII reveal decision. No automated disclosure. | TS + Rust | Interactive CLI, typed consent schema |
+| **EACP L5: Selective Disclosure** | BBS+ proofs for consented PII fields, post-match only, over MLS channel | Rust | BBS+ (W3C), MLS |
+| **EACP L6: Bucket & Venue Isolation** | Per-bucket keys, per-venue policies, audit roots. Venues = access, Buckets = matching. | Rust | HKDF key hierarchy, Pedersen commitments |
 
-The core design philosophy — learned from OpenClaw's catastrophic security failures — is: **push encrypted context out to apps, never pull agents into your data**. And the key architectural insight: **the best defense against data leakage is to never give the agent the sensitive data in the first place** (context minimization).
+### Core Design Principles
 
-### Agent-Agent Discovery: The Missing Piece
+1. **Push encrypted context out, never pull agents into your data** (learned from OpenClaw)
+2. **Agents should never have data they don't need** (context minimization)
+3. **PII never enters the commons** — distillation splits PII from exchange info at Layer 1.5; TEE only processes coarsened exchange info
+4. **Venues are access, buckets are matching** — many-to-many relationship enables cross-venue matching
 
-Current agent protocols (A2A, MCP) support agent communication but not agent *discovery*. The use cases that matter — recruiting, dating, cofounder search — require agents to **find each other** based on encrypted attributes without exposing raw profiles. This is EACP Layers 2-3:
+### The 4-Tier Progressive Revelation System
+
+Raw exchange info is quasi-identifying (~48 bits of entropy for a detailed skills profile). The system coarsens attributes before they enter any matching system:
+
+| Tier | Visibility | Example | k-Anonymity Target | When Revealed |
+|------|-----------|---------|-------------------|---------------|
+| **Tier 0** | Public | Bucket category ("job-seeking") | k > 100,000 | Always visible |
+| **Tier 1** | Within bucket | "Backend engineer, 3-7 years, Bay Area" | k > 1,000 | During matching |
+| **Tier 2** | Matched pool only | "Rust, distributed systems, fintech" | k > 50 | After compatibility score > 0.7 |
+| **Tier 3** | Post-mutual-interest | "Worked at Stripe, UC Berkeley CS" | k > 5 | After both agents signal interest |
+| **Tier 4** | User-controlled | "Jane Smith, jane@email.com" | k = 1 (PII) | After explicit user consent via BBS+ |
+
+### Buckets vs Venues: Two-Tier Topology
+
+```
+ACCESS LAYER (Venues — operators)
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│ WeKruit  │  │ LinkedIn │  │ Organic  │
+│ (Venue)  │  │ Bridge   │  │ CLI      │
+└────┬─────┘  └────┬─────┘  └────┬─────┘
+     │              │              │
+     ▼              ▼              ▼
+MATCHING LAYER (Buckets — purpose namespaces)
+┌────────────────────────────────────────┐
+│  Bucket: senior-swe-sf                  │
+│  Agents from: WeKruit + LinkedIn + CLI  │
+│  Matching: PSI + TEE on exchange info   │
+└────────────────────────────────────────┘
+```
+
+Buckets enable **cross-venue matching**: a CLI-submitted agent and a WeKruit-submitted agent match in the same bucket. This converts a 4-sided platform cold start into a 1-sided community cold start (critical mass: ~50-100 agents per bucket).
+
+### Agent-Agent Discovery
+
+Current agent protocols (A2A, MCP) support agent communication but not agent *discovery*. The use cases that matter — recruiting, dating, cofounder search — require agents to **find each other** based on coarsened attributes without exposing raw profiles:
 
 ```
 Current state:  User manually picks who to share with
                 agentverse share --with ditto.ai
 
-EACP vision:    Agents find each other via encrypted search
-                "Find candidates with 5+ years Rust, open to startups"
-                ...computed inside a TEE clean room, no one sees raw profiles
+EACP vision:    Distilled agents find each other in buckets
+                "Find candidates with 3-7 years backend, US-West"
+                ...matched on Tier 1 coarsened data inside TEE
+                ...PII revealed only post-match with BBS+ consent
 ```
 
-See [encrypted-agent-commons-whitepaper.md](encrypted-agent-commons-whitepaper.md) for the full EACP specification and [protocol-research-synthesis.md](protocol-research-synthesis.md) for the research validation.
+See [encrypted-agent-commons-whitepaper.md](encrypted-agent-commons-whitepaper.md) for the full EACP specification, [protocol-research-synthesis.md](protocol-research-synthesis.md) for research validation, and the 004 reports (backend, frontend, infra) for detailed distillation pipeline, filesystem, and bucket architecture research.
 
 ---
 
@@ -302,6 +343,272 @@ This is inspired by:
 7. Audit log (on orchestrator, no profile data):
    └── "Shared {interests, age_range, location_city} with ditto.ai, expires 2026-04-14"
 ```
+
+### 5.5 Bidirectional Communication Architecture
+
+Phase 1 is push-only (user sends VP to a known agent). Phases 2+ add bidirectional agent-agent communication via two models, each used for different scenarios.
+
+#### Two Evaluation Models: Filesystem-Delegate (1:1) vs TEE Scoring (1:N)
+
+An adversarial debate identified that agent evaluation must use different models at different scales:
+
+| Scenario | Model | Why |
+|----------|-------|-----|
+| **Direct contact** ("I want to talk to Alice") | Filesystem-delegate (1:1) | Two filesystems, LLM scoring is fine. Alice consented to Bob seeing her data. |
+| **Anonymous discovery** ("Find me a Rust cofounder") | TEE scoring (1:N) | Thousands of candidates. TEE scores on coarsened data inside enclave. No LLM reads raw data. |
+
+These coexist in the architecture — the filesystem-delegate is Phase 2, TEE scoring is Phase 3.
+
+#### The Filesystem-Delegate Model (1:1 Direct Contact)
+
+When two agents need to evaluate compatibility for direct contact, each side creates an ephemeral delegate with a read-only **split filesystem**. Both filesystems are mutually visible. Each delegate reads the other's filesystem, scores, and reports to its own human.
+
+```
+Alice's Delegate                          Bob's Delegate
+┌──────────────────────────┐              ┌──────────────────────────┐
+│                          │   mutually   │                          │
+│  MY FILESYSTEM:          │   visible    │  MY FILESYSTEM:          │
+│  ┌────────────────────┐  │◄────────────►│  ┌────────────────────┐  │
+│  │ scored: {          │  │              │  │ scored: {          │  │
+│  │   skills: [rust,ml]│  │              │  │   role: hiring-eng │  │
+│  │   exp: "5-10yr"    │  │              │  │   looking: [rust]  │  │
+│  │   values: [impact] │  │              │  │   culture: remote  │  │
+│  │   looking: [biz]   │  │              │  │   stage: seed      │  │
+│  │ }                  │  │              │  │ }                  │  │
+│  │ human_readable: {  │  │              │  │ human_readable: {  │  │
+│  │   about: "Built.." │  │              │  │   about: "Climate."│  │
+│  │   projects: [...]  │  │              │  │   team_desc: "..."│  │
+│  │ }                  │  │              │  │ }                  │  │
+│  └────────────────────┘  │              │  └────────────────────┘  │
+│                          │              │                          │
+│  LLM scores using ONLY   │              │  LLM scores using ONLY   │
+│  "scored" fields (enums) │              │  "scored" fields (enums) │
+│                          │              │                          │
+│  Output → Alice (human)  │              │  Output → Bob (human)    │
+│  { signal: "strong",     │              │  { signal: "good",       │
+│    matched: [rust,values]│              │    matched: [rust],      │
+│    gaps: [biz-exp] }     │              │    gaps: [seniority] }   │
+└──────────────────────────┘              └──────────────────────────┘
+```
+
+**The split filesystem is the key design:**
+
+| Section | What's in it | Who reads it | Injection risk |
+|---------|-------------|-------------|---------------|
+| `scored` | Enum-only values from fixed taxonomies: skills, experience bands, values, location regions | The delegate's **LLM** for scoring | **None** — can't inject into `"rust"` from a fixed enum |
+| `human_readable` | Free-text: about, project descriptions, working style | The **human** directly (never the scoring LLM) | Human judges free text with their own BS detector |
+
+The scoring LLM ONLY sees the `scored` section. Free text goes directly to the human's screen if the match score passes threshold. This eliminates the prompt injection surface for scoring while preserving rich context for human evaluation.
+
+**Why the delegate has no dangerous capabilities:**
+
+The delegate is a pure function: `(my_filesystem, their_filesystem) → { signal, matched, gaps }`. It cannot send data anywhere (no network), call tools (no tool access), modify either filesystem (read-only), or persist state (ephemeral). Even if the scoring LLM is fully compromised by adversarial content in the `scored` fields, the only output is a schema-validated score shown to the delegate's own human. There is no exfiltration channel.
+
+**The security model is simple:** Both users already consented to the other seeing their filesystem for this purpose. The delegate reading the other's filesystem IS the feature. The security boundary is between main agent and delegate (what enters the filesystem), not between delegates.
+
+**Coarse output signals, not precise scores:**
+
+Delegates output coarse match signals, not numbers:
+```
+signal: "strong" | "good" | "possible" | "weak"    // not "82.7%"
+matchedOn: ["Rust", "distributed systems", "remote"]  // specific criteria
+gaps: ["wants CTO; you want part-time advisor"]        // honest mismatches
+```
+
+Coarse signals are harder to game (inflating from "good" to "strong" requires changing multiple criteria, not just one number) and more useful to humans.
+
+**Role-specific filesystem schemas:**
+
+Recruiting is asymmetric — the recruiter side has a job description, the candidate side has a profile:
+
+```
+RecruiterFilesystem.scored: { role, requirements[], team_size, stage, culture[] }
+CandidateFilesystem.scored: { skills[], experience_band, values[], availability }
+```
+
+Each side's delegate uses a role-appropriate scoring prompt. Symmetric schemas don't work when the data shapes are fundamentally different.
+
+#### TEE Scoring Model (1:N Anonymous Discovery)
+
+For 1:N matching (recruiting buckets, dating venues, cofounder search), scoring happens inside TEE clean rooms. No delegate LLM reads anyone's raw data:
+
+```
+Alice's encrypted       ┌──────────────────────┐      Bob's encrypted
+context pack  ─────────►│  TEE Clean Room       │◄──── context pack
+(Tier 1-2 coarsened)    │  (AWS Nitro Enclave)  │      (Tier 1-2 coarsened)
+                        │                      │
+                        │  HNSW similarity     │
+                        │  PSI eligibility     │
+                        │  Deterministic score │
+                        │                      │
+                        │  Outputs ONLY:       │
+                        │  match tier (A-F)    │
+                        └──────┬───────────────┘
+                               │
+              Both parties receive: "Tier A match"
+              Neither sees the other's raw data
+```
+
+This is the EACP L2-L3 model. It's architecturally consistent — raw data never leaves cryptographic control, scoring is deterministic and auditable, and the TEE attestation proves what code ran.
+
+#### Commit-Then-Reveal for Fairness
+
+Before filesystems become visible in 1:1 mode:
+
+1. Both agents publish `hash(filesystem || nonce)` to the transparency log
+2. Both filesystems are revealed simultaneously
+3. If either party's revealed filesystem doesn't match their commitment → match voided
+
+This prevents bait-and-switch (publishing a generous filesystem, accumulating matches, then editing to minimal).
+
+#### Post-Match Protocol
+
+After both humans approve the match, the interaction transitions from delegate-mediated to human-mediated:
+
+```
+1. MATCH APPROVAL: Both humans see match card + other's human_readable section
+2. REVIEW: Each human reads the full picture (score + structured + free text)
+3. IDENTITY REVEAL: If both proceed → BBS+ selective disclosure of Tier 3-4 data
+   (type "reveal" to confirm, not just y/n)
+4. DIRECT COMMUNICATION: Humans connect via MLS channel or exchange contact info
+```
+
+The delegates' job is done after scoring. Post-match negotiation, relationship building, and nuanced conversation happen between humans. Delegates are matchmakers, not conversationalists.
+
+#### Three Connection Modes
+
+**Mode 1: Direct Contact** — "I want to talk to Alice's agent"
+
+Alice publishes a minimal **doorbell Agent Card** (name + DID + endpoint + `open_to` categories). Bob sends a structured contact request. Alice's main agent triages with a deterministic policy engine (no LLM). If approved → filesystem-delegate scoring.
+
+**Mode 2: Anonymous Discovery** — "Find me a Rust cofounder"
+
+Alice creates an ephemeral persona (own did:jwk, unlinkable). Submits coarsened context pack to a bucket. TEE clean room matches. Anonymous introduction. Neither party knows who the other is until mutual reveal.
+
+**Mode 3: Referral Introduction** — "Carol vouches for Bob"
+
+Carol issues a BBS+ VP referral token (referee + target + purpose + expiry). Non-forgeable, purpose-bound. Alice's main agent verifies Carol's signature and gives the request elevated priority.
+
+#### Persistent Relationship Records
+
+For ongoing relationships, the main agent maintains structured records (not raw conversation):
+
+```json
+{
+  "bob-cofounder": {
+    "did": "did:webvh:bob.example.com",
+    "purpose": "cofounder-search",
+    "preset": ["skills", "experience", "values", "availability"],
+    "meetings": 3,
+    "topics_discussed": ["equity", "architecture"],
+    "trust_level": "established",
+    "last_interaction": "2026-03-14"
+  }
+}
+```
+
+#### Three-Tier Filesystem Model
+
+Some use cases (college applications, founder vision statements, portfolio descriptions) require LLM evaluation of free text — the text IS the signal. The filesystem has three tiers with different trust levels:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  DELEGATE FILESYSTEM                                        │
+│                                                             │
+│  structured: {                    ← TIER 1: Safe for LLM    │
+│    skills: ["rust", "ml"],          Enum-only, fixed taxonomy│
+│    experience_band: "5-10yr",       Zero injection surface   │
+│    values: ["autonomy"],            LLM scores directly      │
+│    location_region: "US-West"                                │
+│  }                                                          │
+│                                                             │
+│  evaluable_text: {                ← TIER 2: LLM with guards │
+│    essay: "The first time I...",    Free text IS the signal  │
+│    vision: "We're building...",     Processed through defense│
+│    project_desc: "Built a..."       stack before scoring     │
+│  }                                                          │
+│                                                             │
+│  human_only: {                    ← TIER 3: Never by LLM    │
+│    recommendations: [...],          Shown to human directly  │
+│    full_transcript: {...},          post-match only          │
+│    draft_history: [...]                                      │
+│  }                                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### `evaluable_text` Defense Stack
+
+Free text that must be LLM-evaluated passes through a 6-layer defense pipeline. Research shows no single layer is provably safe, but the combination creates a very high bar for attackers — and even total compromise only produces a wrong score (no exfiltration, no actions).
+
+```
+evaluable_text (essay, vision statement, etc.)
+       │
+       ▼
+┌──────────────────────────────────────────────┐
+│  1. SANITIZE                                 │
+│     PromptArmor-style pre-processor          │
+│     Strips obvious injection patterns        │
+│     <1% false negative rate                  │
+│     Source: arXiv:2507.15219                  │
+├──────────────────────────────────────────────┤
+│  2. ENCODE (Spotlighting)                    │
+│     Base64-encode the text before LLM sees it│
+│     "ignore instructions" becomes            │
+│     "aWdub3JlIGluc3RydWN0aW9ucw=="          │
+│     ~0% injection success on tested models   │
+│     Source: Microsoft arXiv:2403.14720       │
+├──────────────────────────────────────────────┤
+│  3. EXTRACT                                  │
+│     LLM extracts structured facts from       │
+│     encoded text into typed JSON schema      │
+│     (claims, themes, quality signals)        │
+│     Raw text is NOT forwarded — only the     │
+│     structured extraction                    │
+├──────────────────────────────────────────────┤
+│  4. SCORE                                    │
+│     Separate LLM (fresh context) scores the  │
+│     structured extraction across dimensions  │
+│     Output: enum per dimension + cited       │
+│     evidence from the extraction             │
+│     Schema: { clarity: "strong",             │
+│       originality: "exceptional", ... }      │
+├──────────────────────────────────────────────┤
+│  5. VALIDATE                                 │
+│     Statistical anomaly detection            │
+│     Cross-validation for high-stakes         │
+│     (2-3 independent evaluations)            │
+│     Calibration set monitoring               │
+├──────────────────────────────────────────────┤
+│  6. HUMAN REVIEW                             │
+│     Human sees: dimensional scores +         │
+│     cited evidence + raw text side-by-side   │
+│     Human makes final judgment               │
+└──────────────────────────────────────────────┘
+```
+
+**Why this works despite no single layer being provably safe:**
+- Attacker must survive sanitization (Layer 1) AND encoding (Layer 2) AND extraction schema validation (Layer 3) AND dimensional scoring constraints (Layer 4) AND anomaly detection (Layer 5)
+- Even with total success through all layers, the output is a schema-validated score shown to a human — no exfiltration channel, no tools, no actions
+- The evaluator LLM avoids Willison's "lethal trifecta" (private data + untrusted content + external actions) — we have untrusted content but no external actions
+
+#### Prompt Injection Defense Summary
+
+| Attack Vector | Defense | Residual Risk |
+|--------------|---------|---------------|
+| **Adversarial content in `structured` fields** | Enum-only values from fixed taxonomy — can't inject into `"rust"` | **None** |
+| **Adversarial content in `evaluable_text`** | 6-layer defense stack: sanitize → encode → extract → score → validate → human review | Manipulated dimensional scores (bounded, human-reviewed) |
+| **Adversarial content in `human_only` fields** | Never processed by any LLM — shown directly to human | Human must judge (same as LinkedIn bio) |
+| **Score manipulation at scale** | Anomaly detection: agents scoring 95+ across diverse profiles get flagged | Detectable at population level |
+| **Bait-and-switch filesystems** | Commit-then-reveal via transparency log hash | Voided if mismatch detected |
+| **Post-match data misuse** | Consent is per-interaction, audit-logged. Delegate output is schema-validated and bounded. | Can't control what human does with info shown to them |
+
+#### CaMeL/FIDES Integration (Phase 2+)
+
+For Phase 2 bidirectional communication beyond scoring:
+
+- **From CaMeL**: P-LLM (main agent) / Q-LLM (delegate) split. Variable indirection — main agent references data by name, never sees raw content
+- **From FIDES**: Integrity labels. Data from verified DIDs gets `VERIFIED` integrity; unknown agents get `UNTRUSTED`. Main agent can only branch on `TRUSTED`/`VERIFIED` data
+- **Tiered risk**: Green (read-only) → auto-allow. Yellow (local) → lightweight check. Red (external action) → always require human consent when triggered by untrusted data
 
 ---
 
