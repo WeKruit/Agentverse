@@ -1,0 +1,96 @@
+[
+  {
+    "title": "Python Data Analysis",
+    "create_time": 1705000000,
+    "update_time": 1705000100,
+    "id": "conv-001",
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": ["msg-a1"]
+      },
+      "msg-a1": {
+        "id": "msg-a1",
+        "message": {
+          "id": "msg-a1",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["How do I use pandas for data analysis in Python?"] },
+          "create_time": 1705000010
+        },
+        "parent": "root",
+        "children": ["msg-a2"]
+      },
+      "msg-a2": {
+        "id": "msg-a2",
+        "message": {
+          "id": "msg-a2",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Pandas is a powerful library for data analysis..."] },
+          "create_time": 1705000020
+        },
+        "parent": "msg-a1",
+        "children": ["msg-a3"]
+      },
+      "msg-a3": {
+        "id": "msg-a3",
+        "message": {
+          "id": "msg-a3",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Can you show me how to use machine learning with scikit-learn?"] },
+          "create_time": 1705000030
+        },
+        "parent": "msg-a2",
+        "children": []
+      }
+    }
+  },
+  {
+    "title": "React Frontend Help",
+    "create_time": 1705100000,
+    "update_time": 1705100100,
+    "id": "conv-002",
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": ["msg-b1"]
+      },
+      "msg-b1": {
+        "id": "msg-b1",
+        "message": {
+          "id": "msg-b1",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["I need help with React hooks and TypeScript integration"] },
+          "create_time": 1705100010
+        },
+        "parent": "root",
+        "children": ["msg-b2", "msg-b3"]
+      },
+      "msg-b2": {
+        "id": "msg-b2",
+        "message": {
+          "id": "msg-b2",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["React hooks with TypeScript provide type safety..."] },
+          "create_time": 1705100020
+        },
+        "parent": "msg-b1",
+        "children": []
+      },
+      "msg-b3": {
+        "id": "msg-b3",
+        "message": {
+          "id": "msg-b3",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Actually, let me rephrase. I want to build a Next.js app with CSS modules and Tailwind."] },
+          "create_time": 1705100025
+        },
+        "parent": "msg-b1",
+        "children": []
+      }
+    }
+  }
+]

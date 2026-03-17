@@ -7,3 +7,5 @@ dist/
 *.key.enc
 coverage/
 .DS_Store
+.agentverse-dev/
+.claude/worktrees/

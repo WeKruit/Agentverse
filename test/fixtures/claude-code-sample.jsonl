@@ -1,0 +1,12 @@
+{"uuid":"msg-001","type":"user","message":{"role":"user","content":"Help me write a Rust function to parse JSONL files"},"timestamp":"2026-01-15T10:00:00Z","sessionId":"session-1","cwd":"/home/user/my-project","gitBranch":"main"}
+{"uuid":"msg-002","parentUuid":"msg-001","type":"assistant","message":{"role":"assistant","content":"Here's a Rust function using serde_json for JSONL parsing..."},"timestamp":"2026-01-15T10:00:30Z","sessionId":"session-1"}
+{"uuid":"msg-003","parentUuid":"msg-002","type":"user","message":{"role":"user","content":"Can you add error handling with anyhow and make it async with tokio?"},"timestamp":"2026-01-15T10:01:00Z","sessionId":"session-1"}
+{"uuid":"msg-004","parentUuid":"msg-003","type":"assistant","message":{"role":"assistant","content":"Sure! Here's the updated version with anyhow and tokio..."},"timestamp":"2026-01-15T10:01:30Z","sessionId":"session-1"}
+{"uuid":"msg-005","type":"user","message":{"role":"user","content":"I'm working on a TypeScript project using Next.js and I need help with API routes"},"timestamp":"2026-01-16T09:00:00Z","sessionId":"session-2","cwd":"/home/user/webapp"}
+{"uuid":"msg-006","parentUuid":"msg-005","type":"assistant","message":{"role":"assistant","content":"For Next.js API routes, you can create files in the app/api directory..."},"timestamp":"2026-01-16T09:00:30Z","sessionId":"session-2"}
+{"uuid":"msg-007","parentUuid":"msg-006","type":"user","message":{"role":"user","content":"How do I connect this to PostgreSQL using Prisma?"},"timestamp":"2026-01-16T09:01:00Z","sessionId":"session-2"}
+{"uuid":"msg-008","type":"user","message":{"role":"user","content":"I've been thinking about hiking trails near San Francisco. Also, I love photography and want to do some landscape shots."},"timestamp":"2026-01-17T20:00:00Z","sessionId":"session-3"}
+{"uuid":"msg-009","parentUuid":"msg-008","type":"assistant","message":{"role":"assistant","content":"Great choices! For hiking near SF, I'd recommend..."},"timestamp":"2026-01-17T20:00:30Z","sessionId":"session-3"}
+{"uuid":"msg-010","type":"user","message":{"role":"user","content":"Here's my API key for testing: sk-proj-abc123456789012345678901234567890123 and my AWS access key is AKIAIOSFODNN7EXAMPLE"},"timestamp":"2026-01-18T10:00:00Z","sessionId":"session-4"}
+INVALID LINE THAT SHOULD BE SKIPPED
+{"uuid":"msg-011","type":"user","message":{"role":"user","content":"Can you help me set up Docker and Kubernetes for my distributed system? I need to deploy to AWS."},"timestamp":"2026-01-19T14:00:00Z","sessionId":"session-5"}
