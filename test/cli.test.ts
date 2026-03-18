@@ -24,11 +24,10 @@ describe("agentverse CLI", () => {
     expect(output.trim()).toBe("0.1.0");
   });
 
-  it("discover stub shows Phase 3 message", () => {
+  it("discover command shows usage", () => {
     const output = execFileSync("node", [CLI, "discover"], {
       encoding: "utf-8",
     });
-    expect(output).toContain("Phase 3");
-    expect(output).toContain("EACP");
+    expect(output).toContain("agentverse discover");
   });
 });

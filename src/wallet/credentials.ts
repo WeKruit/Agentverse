@@ -31,6 +31,13 @@ export const AGENTVERSE_CONTEXT = {
   careerStage: "https://agentverse.app/ns#careerStage",
   ageRange: "https://agentverse.app/ns#ageRange",
   spokenLanguages: "https://agentverse.app/ns#spokenLanguages",
+  // Referral token fields
+  referee_did: "https://agentverse.app/ns#referee_did",
+  target_did: "https://agentverse.app/ns#target_did",
+  vouching_level: "https://agentverse.app/ns#vouching_level",
+  message: "https://agentverse.app/ns#message",
+  expires_at: "https://agentverse.app/ns#expires_at",
+  purpose: "https://agentverse.app/ns#purpose",
 };
 
 /**
