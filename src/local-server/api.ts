@@ -202,7 +202,7 @@ export async function startLocalServer(
     res.json({ agent });
   });
 
-  app.post("/api/agents", (req, res) => {
+  app.post("/api/agents", async (req, res) => {
     const { name, purpose, skills, experienceBand, evaluable_text, human_only } = req.body;
     const bucketMap: Record<string, string> = {
       recruiting: "recruiting-swe",
@@ -227,7 +227,7 @@ export async function startLocalServer(
     };
 
     // Generate embedding
-    const { generateLocalEmbedding } = require("../discovery/embeddings.js");
+    const { generateLocalEmbedding } = await import("../discovery/embeddings.js");
     const embedding = generateLocalEmbedding(structured);
 
     try {
@@ -256,11 +256,11 @@ export async function startLocalServer(
     }
   });
 
-  app.delete("/api/agents/:id", (req, res) => {
+  app.delete("/api/agents/:id", async (req, res) => {
     const agent = agentRegistry.get(req.params.id);
     if (!agent) return res.status(404).json({ error: "Agent not found" });
 
-    const { withdrawListing } = require("../discovery/bucket-registry.js");
+    const { withdrawListing } = await import("../discovery/bucket-registry.js");
     withdrawListing(agent.bucketId, agent.listingId);
     agentRegistry.delete(req.params.id);
     res.json({ success: true });
@@ -292,7 +292,7 @@ export async function startLocalServer(
 
     if (!api_key) {
       // Deterministic scoring fallback
-      const { scoreCompatibility } = require("../delegate/lifecycle.js");
+      const { scoreCompatibility } = await import("../delegate/lifecycle.js");
       const fsA = {
         purpose: agentA.purpose,
         created_at: agentA.created_at,
@@ -390,11 +390,11 @@ Rate compatibility. Respond with ONLY valid JSON:
 
   // ─── Reputation ─────────────────────────────────────────
 
-  app.get("/api/agents/:id/reputation", (req, res) => {
+  app.get("/api/agents/:id/reputation", async (req, res) => {
     const agent = agentRegistry.get(req.params.id);
     if (!agent) return res.status(404).json({ error: "Agent not found" });
 
-    const { computeReputation, getOrCreateMetrics } = require("../ecosystem/reputation.js");
+    const { computeReputation, getOrCreateMetrics } = await import("../ecosystem/reputation.js");
     getOrCreateMetrics(agent.did);
     const score = computeReputation(agent.did);
     agent.reputation = score;
