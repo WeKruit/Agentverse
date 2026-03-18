@@ -77,7 +77,7 @@ textarea{resize:vertical;min-height:60px}
   </div>
   <div class="ak">
     <div class="dot" id="ak-dot"></div>
-    <input type="password" id="ak-in" placeholder="Anthropic API key (for LLM scoring)">
+    <span style="font-size:10px;color:var(--dim)" id="ak-label">API key: from .env</span>
   </div>
 </div>
 
@@ -88,6 +88,7 @@ textarea{resize:vertical;min-height:60px}
   <div class="tb" data-v="wallet">Wallet</div>
   <div class="tb" data-v="extract">Extract</div>
   <div class="tb" data-v="buckets">Buckets</div>
+  <div class="tb" data-v="comms">Comms</div>
   <div class="tb" data-v="crypto">Crypto</div>
   <div class="tb" data-v="audit">Audit</div>
   <div class="tb" data-v="gdpr">GDPR</div>
@@ -191,6 +192,22 @@ Example: I've been working with Rust for about 5 years now, mainly building dist
 </div>
 
 <!-- ═══ Crypto ═══ -->
+<!-- ═══ Communications ═══ -->
+<div class="vw" id="v-comms">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px">Agent Communications</h2>
+    <div style="display:flex;gap:8px">
+      <button class="bt bt-v" onclick="runDetailedMatch()">Run Detailed Match</button>
+      <button class="bt" onclick="loadComms()">Refresh</button>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--dim);margin-bottom:16px">Each communication shows what Agent A's delegate read from Agent B's filesystem (and vice versa), plus how each scored the other. This is the full delegate exchange — no data is hidden from you.</p>
+  <div id="comms-list"></div>
+</div>
+
+<!-- ═══ Communication Detail ═══ -->
+<div class="vw" id="v-comm-detail"></div>
+
 <div class="vw" id="v-crypto">
   <h2 style="font-size:18px;margin-bottom:16px">Cryptographic Primitives</h2>
   <div class="g2">
@@ -267,13 +284,12 @@ let agents=[],conns=[],mc=0,walletKeys=null,issuedVC=null;
 document.getElementById('nav').onclick=e=>{const t=e.target.closest('.tb');if(!t)return;const v=t.dataset.v;if(!v)return;
 document.querySelectorAll('.nav .tb').forEach(x=>x.classList.remove('on'));t.classList.add('on');
 document.querySelectorAll('.vw').forEach(x=>x.classList.remove('on'));(document.getElementById('v-'+v)||{classList:{add:()=>{}}}).classList.add('on');
-if(v==='agents')renderAgents();if(v==='matches')loadProps();if(v==='buckets')loadBuckets();if(v==='audit')loadAudit();if(v==='crypto')populateRefDropdown();};
+if(v==='agents')renderAgents();if(v==='matches')loadProps();if(v==='comms')loadComms();if(v==='buckets')loadBuckets();if(v==='audit')loadAudit();if(v==='crypto')populateRefDropdown();};
 function sw(v){document.querySelectorAll('.nav .tb').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.vw').forEach(x=>x.classList.remove('on'));const el=document.getElementById('v-'+v);if(el)el.classList.add('on');}
 
-// ─── API Key ──────────────────────────────────────
-const akIn=document.getElementById('ak-in');
-akIn.oninput=()=>document.getElementById('ak-dot').classList.toggle('on',akIn.value.startsWith('sk-'));
-function gk(){const v=akIn.value.trim();return v.startsWith('sk-')?v:null;}
+// ─── API Key (from server .env) ───────────────────
+async function checkApiKey(){try{const r=await fetch(A+'/api/stats');const s=await r.json();const has=s.has_api_key;document.getElementById('ak-dot').classList.toggle('on',has);document.getElementById('ak-label').textContent=has?'API key: active':'API key: not set (LLM scoring disabled)';}catch{}}
+checkApiKey();
 
 // ─── Canvas ───────────────────────────────────────
 const cw=document.getElementById('cv'),cn=document.getElementById('canvas'),cx=cn.getContext('2d');
@@ -291,7 +307,7 @@ const n=agents.length||1;agents.forEach((ag,i)=>{const ang=(Math.PI*2/n)*i;const
 fr++;requestAnimationFrame(draw);}draw();
 
 // ─── Data ─────────────────────────────────────────
-async function rf(){try{const[b,p,a]=await Promise.all([fetch(A+'/api/buckets'),fetch(A+'/api/proposals'),fetch(A+'/api/agents')]);const bd=await b.json(),pd=await p.json(),ad=await a.json();document.getElementById('s-bk').textContent=bd.buckets.length;document.getElementById('s-pr').textContent=pd.proposals.length;document.getElementById('s-ag').textContent=ad.agents.length;document.getElementById('s-mt').textContent=mc;agents=ad.agents.map(x=>({...x,_x:0,_y:0}));}catch{}}
+async function rf(){try{const[s,a]=await Promise.all([fetch(A+'/api/stats'),fetch(A+'/api/agents')]);const st=await s.json(),ad=await a.json();document.getElementById('s-ag').textContent=st.agents;document.getElementById('s-bk').textContent=st.buckets;document.getElementById('s-mt').textContent=st.matches;document.getElementById('s-pr').textContent=st.proposals;mc=st.matches;agents=ad.agents.map(x=>({...x,_x:0,_y:0}));}catch{}}
 
 // ─── Agents ───────────────────────────────────────
 function renderAgents(){const el=document.getElementById('ag-list');if(!agents.length){el.innerHTML='<div class="em"><h3>No Agents</h3><p>Add agents to get started</p><button class="bt bt-p" onclick="openAdd()">+ Add Agent</button></div>';return;}
@@ -324,9 +340,9 @@ document.getElementById('v-agent-detail').innerHTML=`
 </div>`;sw('agent-detail');}
 
 async function llmScore(id){const others=agents.filter(a=>a.id!==id);if(!others.length){toast('No other agents');return;}
-const tgt=others[0];const el=document.getElementById('llm-'+id);const k=gk();
-el.innerHTML=`<div class="lb"><div class="md">${k?'claude-sonnet-4-20250514':'deterministic'}</div><div style="color:var(--dim)">Scoring against ${tgt.name}...</div></div>`;
-try{const r=await fetch(A+'/api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_a_id:id,agent_b_id:tgt.id,api_key:k})});const d=await r.json();const s=d.result;
+const tgt=others[0];const el=document.getElementById('llm-'+id);
+el.innerHTML=`<div class="lb"><div class="md">Scoring against ${tgt.name}...</div></div>`;
+try{const r=await fetch(A+'/api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_a_id:id,agent_b_id:tgt.id})});const d=await r.json();const s=d.result;
 el.innerHTML=`<div class="lb"><div class="md">${d.method} — vs ${tgt.name}</div><div><span class="sg sg-${s.signal?s.signal[0]:'p'}">${s.signal||'N/A'}</span></div>${s.matched_on?`<div style="margin-top:6px"><b>Matched:</b> ${s.matched_on.join(', ')}</div>`:''}${s.gaps?`<div><b>Gaps:</b> ${s.gaps.join(', ')}</div>`:''}${s.summary?`<div style="margin-top:6px">${s.summary}</div>`:''}${s.reasoning?`<div style="margin-top:4px;color:var(--dim);font-size:11px">${s.reasoning}</div>`:''}${s.recommend_escalate!==undefined?`<div style="margin-top:6px"><b>Escalate:</b> ${s.recommend_escalate?'Yes':'No'}</div>`:''}</div>`;}catch(e){el.innerHTML=`<div class="lb"><div class="md">Error</div><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Matches ──────────────────────────────────────
@@ -334,8 +350,10 @@ async function loadProps(){const r=await fetch(A+'/api/proposals');const{proposa
 if(!proposals.length){el.innerHTML='<div class="em"><h3>No Proposals</h3><p>Run matching to generate proposals</p><button class="bt bt-v" onclick="matchAll()">Run Matching</button></div>';return;}
 el.innerHTML=proposals.map(p=>`<div class="cd"><h3><span class="sg sg-${p.signal[0]}">${p.signal}</span> <span style="font-size:11px;color:var(--dim)">${p.id}</span></h3><div class="ft"><div><span class="k">Bucket:</span> <span class="v">${p.bucket_id}</span></div><div><span class="k">Matched:</span> <span class="v">${p.matched_on.join(', ')||'N/A'}</span></div><div><span class="k">Gaps:</span> <span class="v">${p.gaps.join(', ')||'none'}</span></div><div><span class="k">Peer skills:</span> <span class="v">${(p.peer_structured?.skills||[]).join(', ')}</span></div><div><span class="k">Expires:</span> <span class="v">${new Date(p.expires_at).toLocaleString()}</span></div></div><div style="margin-top:10px;display:flex;gap:8px"><button class="bt bt-s" onclick="acceptP('${p.id}')">Accept</button><button class="bt bt-s bt-d" onclick="declineP('${p.id}')">Decline</button></div></div>`).join('');}
 
-async function acceptP(id){await fetch(A+'/api/proposals/'+id+'/accept',{method:'POST'});fd('a','Accepted '+id.slice(0,12));toast('Accepted');loadProps();}
-async function declineP(id){await fetch(A+'/api/proposals/'+id+'/decline',{method:'POST'});fd('r','Declined '+id.slice(0,12));loadProps();}
+async function acceptP(id){const r=await fetch(A+'/api/proposals/'+id+'/accept',{method:'POST'});const d=await r.json();fd('a','Match accepted — communication created');toast('Match accepted! View in Comms tab');await rf();loadProps();
+// Add connection line for the canvas
+if(d.proposal){conns.push({f:id,t:id+'b',s:'strong',o:Math.random()});}}
+async function declineP(id){await fetch(A+'/api/proposals/'+id+'/decline',{method:'POST'});fd('r','Declined '+id.slice(0,12));await rf();loadProps();}
 
 // ─── Wallet ───────────────────────────────────────
 async function walletInit(){const r=await fetch(A+'/api/wallet/init',{method:'POST'});const d=await r.json();walletKeys=d.exported;
@@ -403,6 +421,89 @@ const el=document.getElementById('matrix-result');
 if(!d.matrix||!d.matrix.length){el.innerHTML='<p class="d">No scoring pairs found (agents may be in different buckets)</p>';return;}
 el.innerHTML=`<table style="width:100%;font-family:var(--mono);font-size:11px;border-collapse:collapse">${d.matrix.map(m=>`<tr style="border-bottom:1px solid var(--brd)"><td style="padding:6px">${m.agent_a}</td><td style="padding:6px">↔</td><td style="padding:6px">${m.agent_b}</td><td style="padding:6px"><span class="sg sg-${m.signal[0]}">${m.signal}</span></td><td style="padding:6px;color:var(--dim)">${m.matched_on.join(', ')}</td></tr>`).join('')}</table>`;
 toast('Matrix generated');}
+
+// ─── Audit ────────────────────────────────────────
+// ─── Communications ───────────────────────────────
+async function runDetailedMatch(){fd('i','Running detailed matching with communication logging...');
+const r=await fetch(A+'/api/match-all-detailed',{method:'POST'});const d=await r.json();
+fd('m',`${d.communications.length} pairwise evaluations logged`);toast(`${d.communications.length} communications`);loadComms();}
+
+async function loadComms(){const r=await fetch(A+'/api/match-comms');const{communications}=await r.json();
+const el=document.getElementById('comms-list');
+if(!communications.length){el.innerHTML='<div class="em"><h3>No Communications</h3><p>Click "Run Detailed Match" to generate delegate evaluations</p></div>';return;}
+el.innerHTML=communications.map(c=>{
+const aS=c.scoring.a_scores_b,bS=c.scoring.b_scores_a;
+const aSignal=aS?.signal||'N/A',bSignal=bS?.signal||'N/A';
+const sc=s=>s==='strong'?'sg-s':s==='good'?'sg-g':s==='possible'?'sg-p':'sg-w';
+return`<div class="cd" style="cursor:pointer" onclick="openCommDetail('${c.id}')">
+<h3 style="font-size:14px">${c.agent_a.name} ↔ ${c.agent_b.name} <span style="font-size:10px;color:var(--dim)">${c.scoring.method}</span></h3>
+<div style="display:flex;gap:24px;margin-top:8px">
+<div style="flex:1"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">${c.agent_a.name}'s delegate scores ${c.agent_b.name}:</div>
+<span class="sg ${sc(aSignal)}">${aSignal}</span>
+${aS?.matched_on?`<span style="font-size:11px;color:var(--dim);margin-left:8px">${aS.matched_on.join(', ')}</span>`:''}</div>
+<div style="flex:1"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">${c.agent_b.name}'s delegate scores ${c.agent_a.name}:</div>
+<span class="sg ${sc(bSignal)}">${bSignal}</span>
+${bS?.matched_on?`<span style="font-size:11px;color:var(--dim);margin-left:8px">${bS.matched_on.join(', ')}</span>`:''}</div>
+</div>
+<div style="font-size:10px;color:var(--dim);margin-top:6px">${new Date(c.timestamp).toLocaleString()} · ${c.status}</div>
+</div>`;}).join('');}
+
+async function openCommDetail(id){const r=await fetch(A+'/api/match-comms/'+id);const{communication:c}=await r.json();
+const aS=c.scoring.a_scores_b||{},bS=c.scoring.b_scores_a||{};
+const renderFs=(fs,label)=>`<div class="tier-box"><h4><span class="tg tg-t">scored</span> ${label} reads</h4>
+<div class="ft">${Object.entries(fs.structured||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${Array.isArray(v)?v.join(', '):v}</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-g">evaluable_text</span></h4>
+<div class="ft">${Object.entries(fs.evaluable_text||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,200)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-r">human_only</span> <span style="font-size:9px;color:var(--dim)">shown to human post-match</span></h4>
+<div class="ft">${Object.entries(fs.human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,200)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>`;
+const renderScore=(s,who,target)=>`<div class="cd"><h3>${who}'s delegate evaluates ${target}</h3>
+<div style="margin:8px 0"><span class="sg sg-${(s.signal||'w')[0]}">${s.signal||'N/A'}</span></div>
+${s.matched_on?`<div style="font-size:12px"><b>Matched on:</b> ${s.matched_on.join(', ')}</div>`:''}
+${s.gaps?`<div style="font-size:12px"><b>Gaps:</b> ${s.gaps.join(', ')}</div>`:''}
+${s.summary?`<div style="font-size:12px;margin-top:4px">${s.summary}</div>`:''}
+${s.recommend_escalate!==undefined?`<div style="font-size:12px;margin-top:4px"><b>Escalate to human:</b> ${s.recommend_escalate?'Yes':'No'}</div>`:''}</div>`;
+
+document.getElementById('v-comm-detail').innerHTML=`
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<h2 style="font-size:18px">${c.agent_a.name} ↔ ${c.agent_b.name}</h2>
+<div style="display:flex;gap:8px">
+<button class="bt bt-v bt-s" onclick="llmScoreComm('${c.id}')">LLM Re-Score</button>
+<button class="bt bt-s" onclick="sw('comms');loadComms()">Back</button>
+</div></div>
+<div style="font-size:11px;color:var(--dim);margin-bottom:16px">Method: ${c.scoring.method} · ${new Date(c.timestamp).toLocaleString()} · Status: ${c.status}</div>
+
+<div style="display:grid;grid-template-columns:1fr 40px 1fr;gap:0;margin-bottom:20px;align-items:start">
+<div>
+<div class="cd"><h3 style="color:var(--teal)">${c.agent_a.name}'s Filesystem</h3>
+<div style="font-size:11px;color:var(--dim);margin-bottom:8px">This is what ${c.agent_b.name}'s delegate reads:</div>
+${renderFs(c.agent_a.filesystem,c.agent_b.name)}</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:20px;color:var(--dim)">↔</div>
+<div>
+<div class="cd"><h3 style="color:var(--purple)">${c.agent_b.name}'s Filesystem</h3>
+<div style="font-size:11px;color:var(--dim);margin-bottom:8px">This is what ${c.agent_a.name}'s delegate reads:</div>
+${renderFs(c.agent_b.filesystem,c.agent_a.name)}</div>
+</div>
+</div>
+
+<h3 style="font-size:15px;margin-bottom:12px">Scoring Results</h3>
+<div class="g2">
+${renderScore(aS,c.agent_a.name,c.agent_b.name)}
+${renderScore(bS,c.agent_b.name,c.agent_a.name)}
+</div>
+<div id="llm-comm-${c.id}" style="margin-top:12px"></div>`;
+sw('comm-detail');}
+
+async function llmScoreComm(id){
+const el=document.getElementById('llm-comm-'+id);el.innerHTML='<div class="lb"><div class="md">Running Claude evaluation...</div></div>';
+try{const r=await fetch(A+'/api/match-comms/'+id+'/llm-score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const d=await r.json();
+if(d.error){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${d.error}</div></div>`;return;}
+el.innerHTML=`<div class="cd"><h3>Claude Evaluation</h3>
+${d.mutual_summary?`<div class="lb"><div class="md">Mutual Assessment</div><div>${d.mutual_summary}</div></div>`:''}
+<div style="font-size:11px;color:var(--dim);margin-top:8px">Scoring method upgraded from deterministic → llm-claude-sonnet</div></div>`;
+fd('a','LLM re-scored communication '+id.slice(0,12));toast('LLM scoring complete');
+// Refresh the detail view
+openCommDetail(id);}catch(e){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Audit ────────────────────────────────────────
 async function loadAudit(){const r=await fetch(A+'/api/audit');const{entries}=await r.json();
