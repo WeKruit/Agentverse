@@ -28,10 +28,25 @@ export function createMatchProposals(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiryHours * 3600000).toISOString();
 
+  // Extract names from filesystem owner_did (format: did:key:name-timestamp)
+  const nameFromDid = (did: string) => {
+    const parts = did.replace("did:key:", "").split("-");
+    parts.pop(); // remove timestamp
+    return parts.join("-") || "Unknown";
+  };
+
+  const nameA = nameFromDid(listingA.owner_did);
+  const nameB = nameFromDid(listingB.owner_did);
+
   const proposalForA: MatchProposal = {
     id: `match-${crypto.randomUUID().slice(0, 8)}`,
     bucket_id: listingA.bucket_id,
+    owner_listing_id: listingA.id,
+    owner_name: nameA,
+    owner_did: listingA.owner_did,
     peer_listing_id: listingB.id,
+    peer_name: nameB,
+    peer_did: listingB.owner_did,
     signal: result.signal,
     matched_on: result.matched_on,
     gaps: result.gaps,
@@ -45,7 +60,12 @@ export function createMatchProposals(
   const proposalForB: MatchProposal = {
     id: `match-${crypto.randomUUID().slice(0, 8)}`,
     bucket_id: listingB.bucket_id,
+    owner_listing_id: listingB.id,
+    owner_name: nameB,
+    owner_did: listingB.owner_did,
     peer_listing_id: listingA.id,
+    peer_name: nameA,
+    peer_did: listingA.owner_did,
     signal: result.signal,
     matched_on: result.matched_on,
     gaps: result.gaps,

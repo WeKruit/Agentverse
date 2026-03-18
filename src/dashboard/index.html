@@ -348,7 +348,29 @@ el.innerHTML=`<div class="lb"><div class="md">${d.method} — vs ${tgt.name}</di
 // ─── Matches ──────────────────────────────────────
 async function loadProps(){const r=await fetch(A+'/api/proposals');const{proposals}=await r.json();const el=document.getElementById('pr-list');
 if(!proposals.length){el.innerHTML='<div class="em"><h3>No Proposals</h3><p>Run matching to generate proposals</p><button class="bt bt-v" onclick="matchAll()">Run Matching</button></div>';return;}
-el.innerHTML=proposals.map(p=>`<div class="cd"><h3><span class="sg sg-${p.signal[0]}">${p.signal}</span> <span style="font-size:11px;color:var(--dim)">${p.id}</span></h3><div class="ft"><div><span class="k">Bucket:</span> <span class="v">${p.bucket_id}</span></div><div><span class="k">Matched:</span> <span class="v">${p.matched_on.join(', ')||'N/A'}</span></div><div><span class="k">Gaps:</span> <span class="v">${p.gaps.join(', ')||'none'}</span></div><div><span class="k">Peer skills:</span> <span class="v">${(p.peer_structured?.skills||[]).join(', ')}</span></div><div><span class="k">Expires:</span> <span class="v">${new Date(p.expires_at).toLocaleString()}</span></div></div><div style="margin-top:10px;display:flex;gap:8px"><button class="bt bt-s" onclick="acceptP('${p.id}')">Accept</button><button class="bt bt-s bt-d" onclick="declineP('${p.id}')">Decline</button></div></div>`).join('');}
+el.innerHTML=proposals.map(p=>{
+const on=p.owner_name||'Unknown';const pn=p.peer_name||'Unknown';
+const sc=s=>s==='strong'?'sg-s':s==='good'?'sg-g':s==='possible'?'sg-p':'sg-w';
+return`<div class="cd" style="border-left:3px solid ${p.signal==='strong'?'var(--teal)':p.signal==='good'?'var(--blue)':p.signal==='possible'?'var(--gold)':'var(--red)'}">
+<h3 style="font-size:15px">${on} <span style="color:var(--dim);font-weight:400">→ matched with →</span> ${pn}</h3>
+<div style="display:flex;gap:16px;margin:10px 0">
+<div style="flex:1;padding:10px;background:rgba(93,202,165,.05);border-radius:6px">
+<div style="font-size:10px;color:var(--dim);margin-bottom:4px">FOR: ${on}</div>
+<div style="font-size:12px">You matched with <b>${pn}</b></div>
+<div style="font-size:11px;color:var(--dim);margin-top:4px">Their skills: ${(p.peer_structured?.skills||[]).map(s=>'<span class="tg tg-t">'+s+'</span>').join(' ')||'N/A'}</div>
+${p.peer_structured?.experienceBand?`<div style="font-size:11px;color:var(--dim)">Experience: ${p.peer_structured.experienceBand}</div>`:''}
+</div>
+</div>
+<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">
+<span class="sg ${sc(p.signal)}">${p.signal}</span>
+<span style="font-size:11px;color:var(--dim)">Matched on: ${p.matched_on.join(', ')||'N/A'}</span>
+${p.gaps.length?`<span style="font-size:11px;color:var(--red)">Gaps: ${p.gaps.join(', ')}</span>`:''}
+</div>
+<div style="font-size:10px;color:var(--dim);margin-bottom:8px">Bucket: ${p.bucket_id} · Expires: ${new Date(p.expires_at).toLocaleString()}</div>
+<div style="display:flex;gap:8px">
+<button class="bt bt-p bt-s" onclick="acceptP('${p.id}')">Accept Match</button>
+<button class="bt bt-s bt-d" onclick="declineP('${p.id}')">Decline</button>
+</div></div>`;}).join('');}
 
 async function acceptP(id){const r=await fetch(A+'/api/proposals/'+id+'/accept',{method:'POST'});const d=await r.json();fd('a','Match accepted — communication created');toast('Match accepted! View in Comms tab');await rf();loadProps();
 // Add connection line for the canvas

@@ -68,7 +68,12 @@ export interface MatchResult {
 export interface MatchProposal {
   id: string;
   bucket_id: string;
-  peer_listing_id: string;
+  owner_listing_id: string; // who this proposal belongs to
+  owner_name: string; // human-readable name of the owner
+  owner_did: string;
+  peer_listing_id: string; // who they matched with
+  peer_name: string; // human-readable name of the peer
+  peer_did: string;
   signal: "strong" | "good" | "possible" | "weak";
   matched_on: string[];
   gaps: string[];
