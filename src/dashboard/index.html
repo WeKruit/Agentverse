@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentverse Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#060610;--bg2:#0d0d1a;--bg3:#141428;--brd:rgba(93,202,165,.15);--teal:#5DCAA5;--purple:#AFA9EC;--gold:#FAC775;--blue:#85B7EB;--red:#F09595;--pink:#ED93B1;--text:#e0e0e0;--dim:#666;--mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+button{cursor:pointer;font-family:var(--sans)}
+input,select,textarea{font-family:var(--mono);background:rgba(255,255,255,.05);border:1px solid var(--brd);border-radius:6px;color:var(--text);padding:8px 10px;font-size:12px;outline:none;width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--teal)}
+textarea{resize:vertical;min-height:60px}
+.hdr{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--brd);background:var(--bg2);flex-shrink:0}
+.hdr .logo{font-size:16px;font-weight:700}.hdr .logo span{color:var(--teal)}
+.hdr .sts{display:flex;gap:20px;font-family:var(--mono);font-size:11px;color:var(--dim)}.hdr .sts b{color:var(--teal)}
+.hdr .ak{display:flex;align-items:center;gap:8px}.hdr .ak input{width:220px;font-size:11px;padding:5px 8px}
+.hdr .ak .dot{width:8px;height:8px;border-radius:50%;background:var(--red)}.hdr .ak .dot.on{background:var(--teal);animation:pls 2s infinite}
+@keyframes pls{0%,100%{box-shadow:0 0 0 0 rgba(93,202,165,.5)}50%{box-shadow:0 0 0 4px rgba(93,202,165,0)}}
+.nav{display:flex;border-bottom:1px solid var(--brd);background:var(--bg2);flex-shrink:0;overflow-x:auto}
+.nav .tb{padding:10px 18px;font-size:12px;font-weight:500;color:var(--dim);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s}
+.nav .tb:hover{color:var(--text);background:rgba(255,255,255,.02)}
+.nav .tb.on{color:var(--teal);border-bottom-color:var(--teal)}
+.mn{flex:1;overflow:hidden}.ct{height:100%;overflow-y:auto;padding:20px}
+.vw{display:none}.vw.on{display:block}
+.cd{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:16px;margin-bottom:12px}
+.cd h3{font-size:13px;font-weight:600;color:var(--teal);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.cd label{display:block;font-size:11px;color:var(--dim);margin-bottom:3px;margin-top:8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.tg{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;margin:2px}
+.tg-t{background:rgba(93,202,165,.15);color:var(--teal)}.tg-p{background:rgba(175,169,236,.15);color:var(--purple)}
+.tg-g{background:rgba(250,199,117,.15);color:var(--gold)}.tg-b{background:rgba(133,183,235,.15);color:var(--blue)}
+.tg-r{background:rgba(240,149,149,.15);color:var(--red)}
+.bt{padding:8px 16px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid var(--brd);background:rgba(93,202,165,.08);color:var(--teal);transition:all .15s}
+.bt:hover{background:rgba(93,202,165,.15);transform:translateY(-1px)}
+.bt-p{background:linear-gradient(135deg,var(--teal),#3BA882);border:none;color:var(--bg);font-weight:700}
+.bt-p:hover{box-shadow:0 0 16px rgba(93,202,165,.4)}
+.bt-d{border-color:rgba(240,149,149,.3);background:rgba(240,149,149,.08);color:var(--red)}
+.bt-v{border-color:rgba(175,169,236,.3);background:rgba(175,169,236,.08);color:var(--purple)}
+.bt-s{padding:5px 10px;font-size:11px}
+.sg{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.sg-s{background:rgba(93,202,165,.15);color:var(--teal)}.sg-g{background:rgba(133,183,235,.15);color:var(--blue)}
+.sg-p{background:rgba(250,199,117,.15);color:var(--gold)}.sg-w{background:rgba(240,149,149,.15);color:var(--red)}
+.ft{font-family:var(--mono);font-size:11px;line-height:1.8}
+.ft .k{color:var(--text)}.ft .v{color:var(--teal)}.ft .d{color:var(--dim)}
+.fd{font-family:var(--mono);font-size:11px;line-height:1.7;max-height:400px;overflow-y:auto}
+.fd .e{padding:1px 0;animation:fi .3s ease forwards;opacity:0}
+.fd .t{color:#444}.fd .a{color:var(--teal)}.fd .m{color:var(--gold)}.fd .r{color:var(--red)}.fd .i{color:var(--blue)}
+@keyframes fi{to{opacity:1}}
+.lb{background:var(--bg3);border:1px solid rgba(175,169,236,.2);border-radius:10px;padding:12px;margin-top:8px;font-size:12px;line-height:1.6}
+.lb .md{font-family:var(--mono);font-size:10px;color:var(--purple);margin-bottom:6px}
+.em{text-align:center;padding:40px 20px;color:var(--dim)}.em h3{color:var(--text);margin-bottom:8px}
+#cv{position:relative;height:300px;border:1px solid var(--brd);border-radius:10px;overflow:hidden;background:var(--bg);margin-bottom:12px}
+#cv canvas{width:100%;height:100%}
+#toast{position:fixed;top:56px;left:50%;transform:translateX(-50%);padding:8px 20px;background:rgba(93,202,165,.15);border:1px solid rgba(93,202,165,.3);border-radius:8px;font-size:12px;color:var(--teal);z-index:999;opacity:0;transition:opacity .3s;pointer-events:none}
+#toast.on{opacity:1}
+#mbg{display:none;position:fixed;inset:0;background:rgba(6,6,16,.85);z-index:500;align-items:center;justify-content:center}
+#mbg.on{display:flex}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#222;border-radius:3px}
+.bar-track{height:6px;background:rgba(255,255,255,.05);border-radius:3px;margin:4px 0}
+.bar-fill{height:100%;border-radius:3px;transition:width .3s}
+.tier-box{border:1px solid var(--brd);border-radius:8px;padding:12px;margin-bottom:8px}
+.tier-box h4{font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="logo"><span>Agentverse</span> Dashboard</div>
+  <div class="sts">
+    <div>Agents <b id="s-ag">0</b></div>
+    <div>Buckets <b id="s-bk">0</b></div>
+    <div>Matches <b id="s-mt">0</b></div>
+    <div>Proposals <b id="s-pr">0</b></div>
+  </div>
+  <div class="ak">
+    <div class="dot" id="ak-dot"></div>
+    <input type="password" id="ak-in" placeholder="Anthropic API key (for LLM scoring)">
+  </div>
+</div>
+
+<div class="nav" id="nav">
+  <div class="tb on" data-v="overview">Overview</div>
+  <div class="tb" data-v="agents">Agents</div>
+  <div class="tb" data-v="matches">Matches</div>
+  <div class="tb" data-v="wallet">Wallet</div>
+  <div class="tb" data-v="extract">Extract</div>
+  <div class="tb" data-v="buckets">Buckets</div>
+  <div class="tb" data-v="crypto">Crypto</div>
+  <div class="tb" data-v="audit">Audit</div>
+  <div class="tb" data-v="gdpr">GDPR</div>
+  <div class="tb" data-v="feed">Feed</div>
+</div>
+
+<div class="mn"><div class="ct" id="ct">
+
+<!-- ═══ Overview ═══ -->
+<div class="vw on" id="v-overview">
+  <div id="cv"><canvas id="canvas"></canvas></div>
+  <div class="g3">
+    <div class="cd"><h3>Quick Actions</h3>
+      <button class="bt bt-p" onclick="openAdd()" style="width:100%;margin-bottom:8px">+ Add Agent</button>
+      <button class="bt" onclick="autoPop()" style="width:100%;margin-bottom:8px">Auto-Populate (8 agents)</button>
+      <button class="bt bt-v" onclick="matchAll()" style="width:100%;margin-bottom:8px">Run Matching</button>
+      <button class="bt" onclick="scoreMatrix()" style="width:100%;margin-bottom:8px">Score Matrix</button>
+      <button class="bt bt-d" onclick="clearAll()" style="width:100%">Clear All</button>
+    </div>
+    <div class="cd"><h3>Recent Matches</h3><div id="r-matches"><p class="d" style="font-size:12px">No matches yet</p></div></div>
+    <div class="cd"><h3>Event Log</h3><div class="fd" id="mini-fd"></div></div>
+  </div>
+</div>
+
+<!-- ═══ Agents ═══ -->
+<div class="vw" id="v-agents">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px">Agents</h2>
+    <div style="display:flex;gap:8px">
+      <button class="bt bt-p" onclick="openAdd()">+ Add Agent</button>
+      <button class="bt" onclick="autoPop()">Auto-Populate</button>
+    </div>
+  </div>
+  <div id="ag-list"></div>
+</div>
+
+<!-- ═══ Agent Detail ═══ -->
+<div class="vw" id="v-agent-detail"></div>
+
+<!-- ═══ Matches ═══ -->
+<div class="vw" id="v-matches">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px">Match Proposals</h2>
+    <button class="bt bt-v" onclick="matchAll()">Run Matching</button>
+  </div>
+  <div id="pr-list"></div>
+</div>
+
+<!-- ═══ Wallet ═══ -->
+<div class="vw" id="v-wallet">
+  <h2 style="font-size:18px;margin-bottom:16px">Credential Wallet</h2>
+  <div class="g2">
+    <div class="cd">
+      <h3>Key Generation</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Generate a BLS12-381 key pair for BBS+ credential signing.</p>
+      <button class="bt bt-p" onclick="walletInit()">Generate Keys</button>
+      <div id="wallet-keys" style="margin-top:12px"></div>
+    </div>
+    <div class="cd">
+      <h3>Issue Credential</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Issue a BBS+ signed VC with custom claims. Requires keys.</p>
+      <label>Claims (JSON)</label>
+      <textarea id="vc-claims" placeholder='{"skills": ["rust", "typescript"], "experienceBand": "5-10yr"}'></textarea>
+      <button class="bt" onclick="walletIssue()" style="margin-top:8px">Issue Credential</button>
+      <div id="vc-result" style="margin-top:12px"></div>
+    </div>
+    <div class="cd" style="grid-column:span 2">
+      <h3>Selective Disclosure</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Derive a proof revealing only selected fields. Hidden fields are cryptographically excluded.</p>
+      <label>Fields to Reveal (comma-separated)</label>
+      <input id="vc-reveal" placeholder="skills, experienceBand">
+      <button class="bt bt-v" onclick="walletDerive()" style="margin-top:8px">Derive Proof</button>
+      <div id="derive-result" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Extract ═══ -->
+<div class="vw" id="v-extract">
+  <h2 style="font-size:18px;margin-bottom:16px">Profile Extraction</h2>
+  <div class="g2">
+    <div class="cd">
+      <h3>Extract from Text</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Paste conversation text to extract a profile. PII patterns are redacted before extraction.</p>
+      <textarea id="ext-text" style="min-height:150px" placeholder="Paste conversation text here...
+
+Example: I've been working with Rust for about 5 years now, mainly building distributed systems. I also use TypeScript for frontend work with React and Next.js. I'm really interested in cryptography and privacy-preserving protocols. My email is jane@example.com and my API key is sk-proj-abc123456789."></textarea>
+      <button class="bt bt-p" onclick="runExtract()" style="margin-top:8px">Extract Profile</button>
+    </div>
+    <div class="cd">
+      <h3>Extracted Profile</h3>
+      <div id="ext-result"><p style="color:var(--dim);font-size:12px">Paste text and click Extract</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Buckets ═══ -->
+<div class="vw" id="v-buckets">
+  <h2 style="font-size:18px;margin-bottom:16px">Buckets</h2>
+  <div id="bk-list" class="g2"></div>
+</div>
+
+<!-- ═══ Crypto ═══ -->
+<div class="vw" id="v-crypto">
+  <h2 style="font-size:18px;margin-bottom:16px">Cryptographic Primitives</h2>
+  <div class="g2">
+    <div class="cd">
+      <h3>Sign-Then-Encrypt Demo</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Demonstrates the DIDComm v2 authcrypt pattern: Ed25519 signing + X25519 ECDH + AES-256-GCM. Each message uses ephemeral keys for forward secrecy.</p>
+      <button class="bt bt-v" onclick="cryptoDemo()">Run Demo</button>
+      <div id="crypto-result" style="margin-top:12px"></div>
+    </div>
+    <div class="cd">
+      <h3>Issue Referral Token</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Issue a BBS+ signed referral token. Non-forgeable, purpose-bound, expiring.</p>
+      <label>Referrer Agent</label>
+      <select id="ref-from"></select>
+      <label>Purpose</label>
+      <select id="ref-purpose"><option>recruiting</option><option>cofounder</option><option>dating</option><option>freelance</option></select>
+      <button class="bt" onclick="issueReferral()" style="margin-top:8px">Issue Referral</button>
+      <div id="ref-result" style="margin-top:12px"></div>
+    </div>
+    <div class="cd" style="grid-column:span 2">
+      <h3>Pairwise Score Matrix</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Deterministic compatibility scoring across all agents.</p>
+      <button class="bt" onclick="scoreMatrix()">Generate Matrix</button>
+      <div id="matrix-result" style="margin-top:12px;overflow-x:auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Audit ═══ -->
+<div class="vw" id="v-audit">
+  <h2 style="font-size:18px;margin-bottom:16px">Audit Log</h2>
+  <div class="cd">
+    <h3>Sharing History <button class="bt bt-s" onclick="loadAudit()">Refresh</button></h3>
+    <div id="audit-list"><p style="color:var(--dim);font-size:12px">No audit entries</p></div>
+  </div>
+</div>
+
+<!-- ═══ GDPR ═══ -->
+<div class="vw" id="v-gdpr">
+  <h2 style="font-size:18px;margin-bottom:16px">GDPR Compliance</h2>
+  <div class="g2">
+    <div class="cd">
+      <h3>Data Export (Article 20)</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Export all data in a structured, machine-readable format. Includes agents, proposals, audit log, and bucket data.</p>
+      <button class="bt" onclick="gdprExport()">Export All Data</button>
+      <div id="gdpr-export" style="margin-top:12px"></div>
+    </div>
+    <div class="cd">
+      <h3>Right to Erasure (Article 17)</h3>
+      <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Delete all agent data, proposals, and audit entries. This action is irreversible.</p>
+      <button class="bt bt-d" onclick="gdprErase()">Erase All Data</button>
+      <div id="gdpr-erase" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Feed ═══ -->
+<div class="vw" id="v-feed">
+  <h2 style="font-size:18px;margin-bottom:16px">Event Feed</h2>
+  <div class="cd"><div class="fd" id="full-fd" style="max-height:calc(100vh - 200px)"></div></div>
+</div>
+
+</div></div>
+
+<div id="toast"></div>
+<div id="mbg"><div class="cd" style="width:500px;max-width:90vw;max-height:90vh;overflow-y:auto" id="modal"></div></div>
+
+<script>
+const A=location.origin;
+const COL={recruiting:'#5DCAA5',cofounder:'#AFA9EC',dating:'#FAC775',freelance:'#85B7EB'};
+let agents=[],conns=[],mc=0,walletKeys=null,issuedVC=null;
+
+// ─── Nav ──────────────────────────────────────────
+document.getElementById('nav').onclick=e=>{const t=e.target.closest('.tb');if(!t)return;const v=t.dataset.v;if(!v)return;
+document.querySelectorAll('.nav .tb').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+document.querySelectorAll('.vw').forEach(x=>x.classList.remove('on'));(document.getElementById('v-'+v)||{classList:{add:()=>{}}}).classList.add('on');
+if(v==='agents')renderAgents();if(v==='matches')loadProps();if(v==='buckets')loadBuckets();if(v==='audit')loadAudit();if(v==='crypto')populateRefDropdown();};
+function sw(v){document.querySelectorAll('.nav .tb').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.vw').forEach(x=>x.classList.remove('on'));const el=document.getElementById('v-'+v);if(el)el.classList.add('on');}
+
+// ─── API Key ──────────────────────────────────────
+const akIn=document.getElementById('ak-in');
+akIn.oninput=()=>document.getElementById('ak-dot').classList.toggle('on',akIn.value.startsWith('sk-'));
+function gk(){const v=akIn.value.trim();return v.startsWith('sk-')?v:null;}
+
+// ─── Canvas ───────────────────────────────────────
+const cw=document.getElementById('cv'),cn=document.getElementById('canvas'),cx=cn.getContext('2d');
+let W=0,H=0,fr=0;
+function rsz(){const d=devicePixelRatio||1;W=cw.clientWidth;H=cw.clientHeight;cn.width=W*d;cn.height=H*d;cx.setTransform(d,0,0,d,0,0);}
+new ResizeObserver(rsz).observe(cw);rsz();
+function draw(){cx.clearRect(0,0,W,H);
+cx.strokeStyle='rgba(93,202,165,.03)';cx.lineWidth=1;for(let x=0;x<W;x+=50){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,H);cx.stroke();}for(let y=0;y<H;y+=50){cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke();}
+const kx=W/2,ky=H/2,t=fr*.008;
+for(let i=0;i<3;i++){cx.strokeStyle=`rgba(93,202,165,${.08-i*.02})`;cx.beginPath();cx.arc(kx,ky,25+i*10,t+i*.5,t+i*.5+Math.PI*1.4);cx.stroke();}
+cx.strokeStyle='rgba(93,202,165,.25)';cx.lineWidth=1.5;cx.beginPath();for(let i=0;i<6;i++){const a=t*.3+Math.PI/3*i;const x=kx+14*Math.cos(a),y=ky+14*Math.sin(a);i?cx.lineTo(x,y):cx.moveTo(x,y);}cx.closePath();cx.stroke();
+cx.fillStyle='rgba(93,202,165,.4)';cx.font='9px "JetBrains Mono"';cx.textAlign='center';cx.fillText('KERNEL',kx,ky+3);
+for(const c of conns){const a=agents.find(x=>x.id===c.f),b=agents.find(x=>x.id===c.t);if(!a?._x||!b?._x)continue;const col=COL[a.purpose]||'#ED93B1';const mx=(a._x+b._x)/2,my=(a._y+b._y)/2-20;cx.strokeStyle=col+'35';cx.lineWidth=1;cx.beginPath();cx.moveTo(a._x,a._y);cx.quadraticCurveTo(mx,my,b._x,b._y);cx.stroke();const pt=(fr*.015+c.o)%1;const dx=(1-pt)*(1-pt)*a._x+2*(1-pt)*pt*mx+pt*pt*b._x,dy=(1-pt)*(1-pt)*a._y+2*(1-pt)*pt*my+pt*pt*b._y;cx.fillStyle=col;cx.beginPath();cx.arc(dx,dy,2,0,Math.PI*2);cx.fill();}
+const n=agents.length||1;agents.forEach((ag,i)=>{const ang=(Math.PI*2/n)*i;const orb=Math.min(kx,ky)*.65;const x=kx+orb*Math.cos(t+ang)+Math.sin(t*1.2+i)*10,y=ky+orb*Math.sin(t+ang)*.6+Math.cos(t*1.5+i)*8;ag._x=x;ag._y=y;const col=COL[ag.purpose]||'#ED93B1';const g=cx.createRadialGradient(x,y,0,x,y,20);g.addColorStop(0,col+'25');g.addColorStop(1,col+'00');cx.fillStyle=g;cx.fillRect(x-20,y-20,40,40);cx.fillStyle=col;cx.beginPath();cx.arc(x,y,6,0,Math.PI*2);cx.fill();cx.fillStyle='#060610';cx.beginPath();cx.arc(x,y,2.5,0,Math.PI*2);cx.fill();cx.fillStyle=col+'bb';cx.font='9px "DM Sans"';cx.textAlign='center';cx.fillText(ag.name,x,y+16);});
+fr++;requestAnimationFrame(draw);}draw();
+
+// ─── Data ─────────────────────────────────────────
+async function rf(){try{const[b,p,a]=await Promise.all([fetch(A+'/api/buckets'),fetch(A+'/api/proposals'),fetch(A+'/api/agents')]);const bd=await b.json(),pd=await p.json(),ad=await a.json();document.getElementById('s-bk').textContent=bd.buckets.length;document.getElementById('s-pr').textContent=pd.proposals.length;document.getElementById('s-ag').textContent=ad.agents.length;document.getElementById('s-mt').textContent=mc;agents=ad.agents.map(x=>({...x,_x:0,_y:0}));}catch{}}
+
+// ─── Agents ───────────────────────────────────────
+function renderAgents(){const el=document.getElementById('ag-list');if(!agents.length){el.innerHTML='<div class="em"><h3>No Agents</h3><p>Add agents to get started</p><button class="bt bt-p" onclick="openAdd()">+ Add Agent</button></div>';return;}
+el.innerHTML=agents.map(a=>{const col=COL[a.purpose]||'#ED93B1';const tc={recruiting:'tg-t',cofounder:'tg-p',dating:'tg-g',freelance:'tg-b'}[a.purpose]||'tg-t';return`<div class="cd" style="cursor:pointer;border-left:3px solid ${col}" onclick="openDetail('${a.id}')"><h3>${a.name} <span class="tg ${tc}">${a.purpose}</span></h3><div style="display:flex;gap:16px;font-size:12px;color:var(--dim)"><div>Skills: ${(a.structured?.skills||[]).map(s=>`<span class="tg tg-t">${s}</span>`).join(' ')}</div><div>Exp: ${a.structured?.experienceBand||'N/A'}</div><div>Personas: ${(a.personas||[]).length}</div></div></div>`;}).join('');}
+
+async function openDetail(id){const ag=agents.find(x=>x.id===id);if(!ag)return;let fs={structured:{},evaluable_text:{},human_only:{}},rep={reputation:{overall:50,tier:'new',components:{}}};
+try{const[f,r]=await Promise.all([fetch(A+'/api/agents/'+id+'/filesystem'),fetch(A+'/api/agents/'+id+'/reputation')]);fs=await f.json();rep=await r.json();}catch{}
+const col=COL[ag.purpose]||'#ED93B1';const rp=rep.reputation;
+document.getElementById('v-agent-detail').innerHTML=`
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<h2 style="font-size:18px;color:${col}">${ag.name}</h2>
+<div style="display:flex;gap:8px"><button class="bt bt-s" onclick="llmScore('${id}')">LLM Score</button><button class="bt bt-s bt-d" onclick="delAgent('${id}')">Delete</button><button class="bt bt-s" onclick="sw('agents');renderAgents()">Back</button></div></div>
+<div class="g2">
+<div class="cd"><h3>Identity</h3><div class="ft"><div><span class="k">DID:</span> <span class="v">${ag.did}</span></div><div><span class="k">Purpose:</span> <span class="v">${ag.purpose}</span></div><div><span class="k">Bucket:</span> <span class="v">${ag.bucketId}</span></div><div><span class="k">Listing:</span> <span class="v">${ag.listingId}</span></div><div><span class="k">Created:</span> <span class="v">${new Date(ag.created_at).toLocaleString()}</span></div></div></div>
+<div class="cd"><h3>Reputation <span class="tg ${rp.tier==='new'?'tg-b':rp.tier==='gold'||rp.tier==='platinum'?'tg-g':'tg-t'}">${rp.tier}</span></h3>
+<div style="font-size:32px;font-weight:700;color:${col};margin:8px 0">${rp.overall}/100</div>
+<div class="ft">${Object.entries(rp.components||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${typeof v==='number'?(v*100).toFixed(0)+'%':v}</span><div class="bar-track"><div class="bar-fill" style="width:${(typeof v==='number'?v*100:50)}%;background:${col}"></div></div></div>`).join('')}</div></div>
+<div class="cd" style="grid-column:span 2"><h3>Delegate Filesystem (Three-Tier)</h3>
+<div class="g3">
+<div class="tier-box"><h4><span class="tg tg-t">Tier 1: structured</span> <span style="font-size:10px;color:var(--dim)">LLM-safe</span></h4>
+<div class="ft">${Object.entries(fs.structured||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${Array.isArray(v)?v.join(', '):v}</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-g">Tier 2: evaluable_text</span> <span style="font-size:10px;color:var(--dim)">defense stack</span></h4>
+<div class="ft">${Object.entries(fs.evaluable_text||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-r">Tier 3: human_only</span> <span style="font-size:10px;color:var(--dim)">never by LLM</span></h4>
+<div class="ft">${Object.entries(fs.human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+</div></div>
+<div class="cd"><h3>Personas <button class="bt bt-s" onclick="addPersona('${id}')">+ Add</button></h3>
+<div>${(ag.personas||[]).map(p=>`<span class="tg tg-t">${p}</span>`).join(' ')||'<span class="d">none</span>'}</div></div>
+<div class="cd"><h3>LLM Evaluation</h3><div id="llm-${id}"><p class="d" style="font-size:12px">Click "LLM Score" to run AI compatibility evaluation</p></div></div>
+</div>`;sw('agent-detail');}
+
+async function llmScore(id){const others=agents.filter(a=>a.id!==id);if(!others.length){toast('No other agents');return;}
+const tgt=others[0];const el=document.getElementById('llm-'+id);const k=gk();
+el.innerHTML=`<div class="lb"><div class="md">${k?'claude-sonnet-4-20250514':'deterministic'}</div><div style="color:var(--dim)">Scoring against ${tgt.name}...</div></div>`;
+try{const r=await fetch(A+'/api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_a_id:id,agent_b_id:tgt.id,api_key:k})});const d=await r.json();const s=d.result;
+el.innerHTML=`<div class="lb"><div class="md">${d.method} — vs ${tgt.name}</div><div><span class="sg sg-${s.signal?s.signal[0]:'p'}">${s.signal||'N/A'}</span></div>${s.matched_on?`<div style="margin-top:6px"><b>Matched:</b> ${s.matched_on.join(', ')}</div>`:''}${s.gaps?`<div><b>Gaps:</b> ${s.gaps.join(', ')}</div>`:''}${s.summary?`<div style="margin-top:6px">${s.summary}</div>`:''}${s.reasoning?`<div style="margin-top:4px;color:var(--dim);font-size:11px">${s.reasoning}</div>`:''}${s.recommend_escalate!==undefined?`<div style="margin-top:6px"><b>Escalate:</b> ${s.recommend_escalate?'Yes':'No'}</div>`:''}</div>`;}catch(e){el.innerHTML=`<div class="lb"><div class="md">Error</div><div style="color:var(--red)">${e.message}</div></div>`;}}
+
+// ─── Matches ──────────────────────────────────────
+async function loadProps(){const r=await fetch(A+'/api/proposals');const{proposals}=await r.json();const el=document.getElementById('pr-list');
+if(!proposals.length){el.innerHTML='<div class="em"><h3>No Proposals</h3><p>Run matching to generate proposals</p><button class="bt bt-v" onclick="matchAll()">Run Matching</button></div>';return;}
+el.innerHTML=proposals.map(p=>`<div class="cd"><h3><span class="sg sg-${p.signal[0]}">${p.signal}</span> <span style="font-size:11px;color:var(--dim)">${p.id}</span></h3><div class="ft"><div><span class="k">Bucket:</span> <span class="v">${p.bucket_id}</span></div><div><span class="k">Matched:</span> <span class="v">${p.matched_on.join(', ')||'N/A'}</span></div><div><span class="k">Gaps:</span> <span class="v">${p.gaps.join(', ')||'none'}</span></div><div><span class="k">Peer skills:</span> <span class="v">${(p.peer_structured?.skills||[]).join(', ')}</span></div><div><span class="k">Expires:</span> <span class="v">${new Date(p.expires_at).toLocaleString()}</span></div></div><div style="margin-top:10px;display:flex;gap:8px"><button class="bt bt-s" onclick="acceptP('${p.id}')">Accept</button><button class="bt bt-s bt-d" onclick="declineP('${p.id}')">Decline</button></div></div>`).join('');}
+
+async function acceptP(id){await fetch(A+'/api/proposals/'+id+'/accept',{method:'POST'});fd('a','Accepted '+id.slice(0,12));toast('Accepted');loadProps();}
+async function declineP(id){await fetch(A+'/api/proposals/'+id+'/decline',{method:'POST'});fd('r','Declined '+id.slice(0,12));loadProps();}
+
+// ─── Wallet ───────────────────────────────────────
+async function walletInit(){const r=await fetch(A+'/api/wallet/init',{method:'POST'});const d=await r.json();walletKeys=d.exported;
+document.getElementById('wallet-keys').innerHTML=`<div class="ft"><div><span class="k">Public Key:</span> <span class="v">${d.exported.publicKeyMultibase.slice(0,40)}...</span></div><div><span class="k">DID:</span> <span class="v">${d.didDocument.id}</span></div><div><span class="k">Algorithm:</span> <span class="v">BBS-BLS12-381-SHA-256</span></div></div>`;fd('a','Generated BLS12-381 key pair');toast('Keys generated');}
+
+async function walletIssue(){if(!walletKeys){toast('Generate keys first');return;}
+let claims;try{claims=JSON.parse(document.getElementById('vc-claims').value);}catch{toast('Invalid JSON');return;}
+const r=await fetch(A+'/api/wallet/issue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({claims,...walletKeys})});const d=await r.json();
+if(d.error){toast('Error: '+d.error);return;}
+issuedVC=d.credential;
+document.getElementById('vc-result').innerHTML=`<div class="lb"><div class="md">BBS+ Signed VC</div><div class="ft"><div><span class="k">Type:</span> <span class="v">${d.credential.type.join(', ')}</span></div><div><span class="k">Cryptosuite:</span> <span class="v">${d.credential.proof?.cryptosuite}</span></div><div><span class="k">Claims:</span> <span class="v">${Object.keys(d.credential.credentialSubject).filter(k=>k!=='id').join(', ')}</span></div></div></div>`;fd('a','Issued BBS+ credential');toast('Credential issued');}
+
+async function walletDerive(){if(!issuedVC||!walletKeys){toast('Issue a credential first');return;}
+const fields=document.getElementById('vc-reveal').value.split(',').map(s=>s.trim()).filter(Boolean);if(!fields.length){toast('Enter fields to reveal');return;}
+const r=await fetch(A+'/api/wallet/derive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signedVC:issuedVC,revealFields:fields,...walletKeys})});const d=await r.json();
+if(d.error){toast('Error: '+d.error);return;}
+const disclosed=Object.keys(d.derived.credentialSubject||{}).filter(k=>k!=='id');const hidden=Object.keys(issuedVC.credentialSubject||{}).filter(k=>k!=='id'&&!disclosed.includes(k));
+document.getElementById('derive-result').innerHTML=`<div class="lb"><div class="md">Derived Proof — ${d.verified?'VERIFIED':'FAILED'}</div><div style="margin:8px 0"><span class="tg tg-t">Disclosed (${disclosed.length})</span> ${disclosed.map(f=>`<span class="tg tg-t">${f}</span>`).join(' ')}</div><div><span class="tg tg-r">Hidden (${hidden.length})</span> ${hidden.map(f=>`<span class="tg tg-r">${f}</span>`).join(' ')}</div><div style="margin-top:8px;font-size:11px;color:var(--dim)">Hidden attributes are cryptographically excluded — not redacted, absent. The verifier cannot access them.</div></div>`;
+fd('a',`Derived proof: ${disclosed.length} revealed, ${hidden.length} hidden`);toast(d.verified?'Proof verified':'Verification failed');}
+
+// ─── Extract ──────────────────────────────────────
+async function runExtract(){const text=document.getElementById('ext-text').value;if(!text.trim()){toast('Paste some text');return;}
+const r=await fetch(A+'/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});const d=await r.json();const p=d.profile;
+document.getElementById('ext-result').innerHTML=`
+<div class="ft">${d.redactions.length?`<div style="margin-bottom:8px"><span class="tg tg-r">Redacted: ${d.redactions.map(r=>r.type+' ('+r.count+')').join(', ')}</span></div>`:''}
+<h4 style="color:var(--teal);margin:8px 0">Skills (${p.skills.length})</h4>
+${p.skills.map(s=>`<div><span class="k">${s.name}</span> <div class="bar-track"><div class="bar-fill" style="width:${s.confidence*100}%;background:var(--teal)"></div></div><span class="d">${s.confidence.toFixed(2)} (${s.mentions} mentions)</span></div>`).join('')||'<div class="d">none detected</div>'}
+<h4 style="color:var(--gold);margin:8px 0">Interests (${p.interests.length})</h4>
+${p.interests.map(i=>`<div><span class="k">${i.topic}</span> <span class="d">(${i.mentions} mentions)</span></div>`).join('')||'<div class="d">none detected</div>'}
+<h4 style="color:var(--blue);margin:8px 0">Communication</h4>
+<div><span class="k">Style:</span> <span class="v">${p.communication.verbosity} / ${p.communication.formality} / ${p.communication.technicalDepth}</span></div>
+</div>`;fd('a','Extracted profile: '+p.skills.length+' skills');toast('Profile extracted');}
+
+// ─── Buckets ──────────────────────────────────────
+async function loadBuckets(){const r=await fetch(A+'/api/buckets');const{buckets}=await r.json();
+document.getElementById('bk-list').innerHTML=buckets.map(b=>`<div class="cd"><h3>${b.name} <span class="tg tg-t">${b.category}</span></h3><div class="ft"><div><span class="k">ID:</span> <span class="v">${b.id}</span></div><div><span class="k">Fields:</span> <span class="v">${b.schema_fields.join(', ')}</span></div><div><span class="k">Agents:</span> <span class="v">${b.agent_count}</span></div><div><span class="k">Status:</span> <span class="v">${b.status}</span></div></div></div>`).join('');}
+
+// ─── Crypto ───────────────────────────────────────
+async function cryptoDemo(){const el=document.getElementById('crypto-result');el.innerHTML='<div class="lb"><div class="md">Running...</div></div>';
+const r=await fetch(A+'/api/crypto/sign-encrypt',{method:'POST'});const d=await r.json();
+el.innerHTML=`<div class="lb"><div class="md">Sign-Then-Encrypt Result</div><div class="ft">
+<div><span class="k">Original:</span> <span class="v">${d.original}</span></div>
+<div style="margin:8px 0"><span class="tg tg-p">Encrypted Envelope</span></div>
+<div><span class="k">Ciphertext:</span> <span class="v">${d.envelope.ciphertext}</span></div>
+<div><span class="k">Ephemeral key:</span> <span class="v">${d.envelope.ephemeral_key}</span></div>
+<div><span class="k">Signer:</span> <span class="v">${d.envelope.signer_did}</span></div>
+<div><span class="k">Recipient:</span> <span class="v">${d.envelope.recipient_key_id}</span></div>
+<div style="margin:8px 0"><span class="tg tg-t">Decrypted + Verified</span></div>
+<div><span class="k">Decrypted:</span> <span class="v">${d.decrypted}</span></div>
+<div><span class="k">Signature valid:</span> <span class="v">${d.signature_valid}</span></div>
+<div><span class="k">Signer DID:</span> <span class="v">${d.signer_did}</span></div>
+</div></div>`;fd('a','Sign-then-encrypt demo completed');toast('Crypto demo done');}
+
+function populateRefDropdown(){const sel=document.getElementById('ref-from');sel.innerHTML=agents.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')||'<option>No agents</option>';}
+
+async function issueReferral(){const from=document.getElementById('ref-from').value;const purpose=document.getElementById('ref-purpose').value;
+if(!from||from==='No agents'){toast('Add agents first');return;}
+const r=await fetch(A+'/api/referrals/issue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({referrer_id:from,purpose})});const d=await r.json();
+document.getElementById('ref-result').innerHTML=d.error?`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${d.error}</div></div>`:`<div class="lb"><div class="md">Referral Token Issued</div><div class="ft"><div><span class="k">Issuer:</span> <span class="v">${d.token.issuer}</span></div><div><span class="k">Purpose:</span> <span class="v">${d.token.purpose}</span></div><div><span class="k">BBS+ Proof:</span> <span class="v">${d.token.has_proof?'Yes':'No'}</span></div></div></div>`;
+fd('a','Referral token issued');toast('Referral issued');}
+
+async function scoreMatrix(){const ids=agents.map(a=>a.id);if(ids.length<2){toast('Need 2+ agents');return;}
+const r=await fetch(A+'/api/score-matrix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_ids:ids})});const d=await r.json();
+const el=document.getElementById('matrix-result');
+if(!d.matrix||!d.matrix.length){el.innerHTML='<p class="d">No scoring pairs found (agents may be in different buckets)</p>';return;}
+el.innerHTML=`<table style="width:100%;font-family:var(--mono);font-size:11px;border-collapse:collapse">${d.matrix.map(m=>`<tr style="border-bottom:1px solid var(--brd)"><td style="padding:6px">${m.agent_a}</td><td style="padding:6px">↔</td><td style="padding:6px">${m.agent_b}</td><td style="padding:6px"><span class="sg sg-${m.signal[0]}">${m.signal}</span></td><td style="padding:6px;color:var(--dim)">${m.matched_on.join(', ')}</td></tr>`).join('')}</table>`;
+toast('Matrix generated');}
+
+// ─── Audit ────────────────────────────────────────
+async function loadAudit(){const r=await fetch(A+'/api/audit');const{entries}=await r.json();
+const el=document.getElementById('audit-list');
+if(!entries.length){el.innerHTML='<p class="d" style="font-size:12px">No audit entries</p>';return;}
+el.innerHTML=entries.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px"><span class="tg ${e.status==='shared'?'tg-t':e.status==='denied'?'tg-r':'tg-g'}">${e.status}</span> <span style="color:var(--dim)">${e.timestamp}</span> <span>${e.agent_domain||'N/A'}</span>${e.attributes_disclosed?.length?` — ${e.attributes_disclosed.join(', ')}`:''}</div>`).join('');}
+
+// ─── GDPR ─────────────────────────────────────────
+async function gdprExport(){const r=await fetch(A+'/api/gdpr/export');const d=await r.json();
+const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='agentverse-export-'+Date.now()+'.json';a.click();URL.revokeObjectURL(url);
+document.getElementById('gdpr-export').innerHTML=`<div class="lb"><div class="md">Export Complete</div><div class="ft"><div><span class="k">Agents:</span> <span class="v">${d.agents.length}</span></div><div><span class="k">Proposals:</span> <span class="v">${d.proposals.length}</span></div><div><span class="k">Audit entries:</span> <span class="v">${d.audit.length}</span></div><div><span class="k">Buckets:</span> <span class="v">${d.buckets.length}</span></div></div></div>`;toast('Data exported');}
+
+async function gdprErase(){if(!confirm('This will delete ALL data. Are you sure?'))return;const r=await fetch(A+'/api/gdpr/erase',{method:'POST'});const d=await r.json();agents=[];conns=[];mc=0;rf();
+document.getElementById('gdpr-erase').innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div class="md" style="color:var(--red)">Data Erased</div><div class="ft"><div><span class="k">Agents deleted:</span> <span class="v">${d.agents_deleted}</span></div></div></div>`;fd('r','All data erased (GDPR Article 17)');toast('Data erased');}
+
+// ─── Actions ──────────────────────────────────────
+async function matchAll(){fd('i','Running matching engine...');conns=[];
+const r=await fetch(A+'/api/match-all',{method:'POST'});const d=await r.json();
+for(const m of d.matches){mc++;conns.push({f:m.listing_a_id||m.agent_id,t:m.listing_b_id,s:m.signal,o:Math.random()});fd('m',`${m.signal.toUpperCase()}: ${(m.matched_on||[]).join(', ')}`);}
+const rm=document.getElementById('r-matches');rm.innerHTML=d.matches.slice(0,5).map(m=>`<div style="font-size:11px;padding:2px 0"><span class="sg sg-${m.signal[0]}">${m.signal}</span> ${(m.matched_on||[]).slice(0,2).join(', ')}</div>`).join('')||'<p class="d" style="font-size:12px">No matches</p>';
+rf();toast(`${d.matches.length} matches, ${d.proposals.length} proposals`);}
+
+async function delAgent(id){await fetch(A+'/api/agents/'+id,{method:'DELETE'});agents=agents.filter(a=>a.id!==id);conns=conns.filter(c=>c.f!==id&&c.t!==id);fd('r','Deleted agent');rf();sw('agents');renderAgents();}
+
+function addPersona(id){const p=prompt('Purpose (recruiting, cofounder, dating, freelance):');if(!p)return;fetch(A+'/api/agents/'+id+'/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose:p})}).then(()=>{toast('Persona added');openDetail(id);});}
+
+async function autoPop(){const ns=['Alice','Bob','Carol','Dave','Eve','Frank','Grace','Heidi'];
+const ps=['recruiting','recruiting','recruiting','cofounder','cofounder','recruiting','freelance','dating'];
+const sk=[['rust','typescript','distributed-systems'],['python','ml','pytorch'],['go','kubernetes','aws'],['product','strategy','fundraising'],['engineering','rust','systems'],['react','nextjs','typescript'],['python','django','postgresql'],['hiking','photography','cooking']];
+const bn=['3-5yr','5-10yr','10+yr','5-10yr','3-5yr','1-3yr','5-10yr','3-5yr'];
+const ab=['Built payment infrastructure at Stripe.','ML researcher focused on transformers.','Cloud lead, migrated 200 services to k8s.','Serial entrepreneur, raised $5M seed.','Systems engineer, correctness-obsessed.','Frontend architect, 50+ component design system.','Full-stack freelancer, data-intensive web apps.','Outdoor enthusiast and landscape photographer.'];
+for(let i=0;i<ns.length;i++){await fetch(A+'/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:ns[i],purpose:ps[i],skills:sk[i],experienceBand:bn[i],evaluable_text:{about:ab[i]},human_only:{notes:'Demo agent'}})});fd('a',ns[i]+' joined '+ps[i]);await new Promise(r=>setTimeout(r,80));}
+await rf();toast('Added 8 agents');renderAgents();setTimeout(matchAll,300);}
+
+function clearAll(){agents.forEach(a=>fetch(A+'/api/agents/'+a.id,{method:'DELETE'}).catch(()=>{}));agents=[];conns=[];mc=0;document.getElementById('mini-fd').innerHTML='';document.getElementById('full-fd').innerHTML='';rf();toast('Cleared');}
+
+// ─── Add Agent Modal ──────────────────────────────
+function openAdd(){document.getElementById('modal').innerHTML=`
+<h3>Add Agent</h3>
+<label>Name</label><input id="m-n" value="Agent-${agents.length+1}">
+<label>Purpose</label><select id="m-p"><option value="recruiting">Recruiting</option><option value="cofounder">Cofounder</option><option value="dating">Dating</option><option value="freelance">Freelance</option></select>
+<label>Skills (comma-separated)</label><input id="m-s" placeholder="rust, typescript">
+<label>Experience Band</label><select id="m-e"><option value="1-3yr">1-3yr</option><option value="3-5yr" selected>3-5yr</option><option value="5-10yr">5-10yr</option><option value="10+yr">10+yr</option></select>
+<label>About (Tier 2 — evaluable text)</label><textarea id="m-a" placeholder="Description..."></textarea>
+<label>Notes (Tier 3 — human only)</label><textarea id="m-h" placeholder="Private notes..."></textarea>
+<div style="display:flex;gap:8px;margin-top:16px"><button class="bt bt-p" onclick="submitAdd()">Add</button><button class="bt" onclick="closeM()">Cancel</button></div>`;
+document.getElementById('mbg').classList.add('on');}
+
+async function submitAdd(){const n=document.getElementById('m-n').value||'Agent';const p=document.getElementById('m-p').value;const s=document.getElementById('m-s').value.split(',').map(x=>x.trim()).filter(Boolean);const e=document.getElementById('m-e').value;const a=document.getElementById('m-a').value;const h=document.getElementById('m-h').value;
+if(!s.length){toast('Add skills');return;}
+await fetch(A+'/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,purpose:p,skills:s,experienceBand:e,evaluable_text:a?{about:a}:undefined,human_only:h?{notes:h}:undefined})});
+fd('a',n+' joined '+p);await rf();closeM();toast(n+' added');}
+
+function closeM(){document.getElementById('mbg').classList.remove('on');}
+
+// ─── Helpers ──────────────────────────────────────
+function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),2500);}
+function fd(c,t){const tm=new Date().toLocaleTimeString('en-US',{hour12:false});const h=`<div class="e"><span class="t">${tm}</span> <span class="${c}">${t}</span></div>`;
+for(const el of[document.getElementById('mini-fd'),document.getElementById('full-fd')]){el.insertAdjacentHTML('afterbegin',h);while(el.children.length>200)el.lastChild.remove();}}
+
+rf();fd('i','Dashboard connected');
+</script>
+</body>
+</html>

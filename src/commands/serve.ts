@@ -35,7 +35,7 @@ export const serveCommand = new Command("serve")
       port,
     });
 
-    console.log(`  Server running at ${instance.url}`);
+    console.log(`  Dashboard: ${instance.url}`);
     console.log(`  Agent Card: ${instance.url}/.well-known/agent.json`);
     console.log(`  Health: ${instance.url}/health`);
     console.log(`  DID: ${did}`);
