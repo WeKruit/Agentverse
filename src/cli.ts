@@ -10,6 +10,7 @@ import { walletCommand } from "./commands/wallet.js";
 import { keysCommand } from "./commands/keys.js";
 import { discoverCommand } from "./commands/discover.js";
 import { matchCommand } from "./commands/match.js";
+import { serveCommand } from "./commands/serve.js";
 
 const program = new Command();
 
@@ -29,9 +30,12 @@ program.addCommand(auditCommand);
 program.addCommand(walletCommand);
 program.addCommand(keysCommand);
 
-// Phase 3: Discovery
+// Phase 3: Discovery + Matching
 program.addCommand(discoverCommand);
 program.addCommand(matchCommand);
+
+// Local server
+program.addCommand(serveCommand);
 
 // Phase 2+ stubs
 program
