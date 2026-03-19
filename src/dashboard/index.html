@@ -383,23 +383,11 @@ ${m.status==='proposed'||m.status==='accepted'?`<div style="display:flex;gap:8px
 ${m.a_decision==='pending'?`<button class="bt bt-p bt-s" onclick="doAccept('${m.id}','${a.id}')">${a.name} Accepts</button><button class="bt bt-s bt-d" onclick="doDecline('${m.id}','${a.id}')">${a.name} Declines</button>`:''}
 ${m.b_decision==='pending'?`<button class="bt bt-v bt-s" onclick="doAccept('${m.id}','${b.id}')">${b.name} Accepts</button><button class="bt bt-s bt-d" onclick="doDecline('${m.id}','${b.id}')">${b.name} Declines</button>`:''}
 </div>`:''}
-${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bottom:8px">
-<div class="md">MUTUAL MATCH — Reveal Unlocked</div>
-<div class="g2" style="gap:8px">
-<div><b>${a.name} sees ${b.name}'s private data:</b><div class="ft">${Object.entries(m.reveal.b_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')}</div><div style="font-size:10px;color:var(--dim)">DID: ${m.reveal.b_real_did}</div></div>
-<div><b>${b.name} sees ${a.name}'s private data:</b><div class="ft">${Object.entries(m.reveal.a_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')}</div><div style="font-size:10px;color:var(--dim)">DID: ${m.reveal.a_real_did}</div></div>
-</div></div>
-<div style="margin-bottom:8px">
-<div style="font-size:11px;font-weight:600;margin-bottom:6px">Messages (${m.messages.length})</div>
-${m.messages.map(msg=>`<div style="padding:4px 8px;margin:2px 0;background:${msg.from==='a'?'rgba(93,202,165,.08)':'rgba(175,169,236,.08)'};border-radius:4px;font-size:12px"><b>${msg.from==='a'?a.name:b.name}:</b> ${msg.content} <span style="color:var(--dim);font-size:10px">${new Date(msg.timestamp).toLocaleTimeString()}</span></div>`).join('')}
-<div style="display:flex;gap:8px;margin-top:8px">
-<input id="msg-${m.id}" placeholder="Type a message..." style="flex:1">
-<button class="bt bt-s" onclick="sendMsg('${m.id}','${a.id}')">Send as ${a.name}</button>
-<button class="bt bt-s bt-v" onclick="sendMsg('${m.id}','${b.id}')">Send as ${b.name}</button>
-</div></div>`:''}
+${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bottom:8px;border-color:var(--teal)">
+<div class="md">MUTUAL MATCH — Private Data Revealed</div>
+</div>`:''}
 <div style="display:flex;gap:8px">
-<button class="bt bt-p bt-s" onclick="runLLMAgents('${m.id}')">Run LLM Agents</button>
-<button class="bt bt-s" onclick="llmScoreMatch('${m.id}')">LLM Re-Score</button>
+<button class="bt bt-p bt-s" onclick="openMatch('${m.id}')">View Details + Run LLM Agents</button>
 <div style="font-size:10px;color:var(--dim);display:flex;align-items:center">Method: ${s.method}${s.files_read?' · '+s.files_read.length+' files read':''} · Expires: ${new Date(m.expires_at).toLocaleString()}</div>
 </div>
 <div id="llm-match-${m.id}" style="margin-top:8px"></div>
@@ -415,6 +403,101 @@ async function doDecline(matchId,agentId){await fetch(A+'/api/matches/'+matchId+
 async function sendMsg(matchId,agentId){const inp=document.getElementById('msg-'+matchId);const content=inp.value.trim();if(!content)return;
 await fetch(A+'/api/matches/'+matchId+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agentId,content})});
 inp.value='';fd('i','Message sent');loadProps();}
+
+// ─── Match Detail View ───────────────────────────
+async function openMatch(matchId){const r=await fetch(A+'/api/matches/'+matchId);const{match:m}=await r.json();
+const a=m.agent_a,b=m.agent_b;
+
+// Load file trees for both agents
+let treeA='loading...',treeB='loading...';
+try{const ra=await fetch(A+'/api/agents/'+a.id+'/files');const da=await ra.json();treeA=renderFsTree(da.tree);}catch{treeA='<div class="d">No files on disk</div>';}
+try{const rb=await fetch(A+'/api/agents/'+b.id+'/files');const db=await rb.json();treeB=renderFsTree(db.tree);}catch{treeB='<div class="d">No files on disk</div>';}
+
+document.getElementById('v-match-detail').innerHTML=`
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<h2 style="font-size:18px">${a.name} <span style="color:var(--dim);font-weight:400">↔</span> ${b.name}</h2>
+<div style="display:flex;gap:8px">
+<span class="tg ${m.status==='mutual'||m.status==='connected'?'tg-t':m.status==='declined'?'tg-r':'tg-b'}">${m.status}</span>
+<button class="bt bt-p bt-s" onclick="streamLLMAgents('${matchId}')">Run LLM Agents</button>
+<button class="bt bt-s" onclick="sw('matches');loadProps()">Back</button>
+</div></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+<div class="cd"><h3 style="color:var(--teal)">${a.name}'s Filesystem</h3>
+<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${b.name}'s delegate reads these files</div>
+<div class="ft" style="max-height:300px;overflow-y:auto">${treeA}</div></div>
+<div class="cd"><h3 style="color:var(--purple)">${b.name}'s Filesystem</h3>
+<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${a.name}'s delegate reads these files</div>
+<div class="ft" style="max-height:300px;overflow-y:auto">${treeB}</div></div>
+</div>
+
+${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bottom:12px;border-color:var(--teal)">
+<div class="md">MUTUAL MATCH — Private Data Revealed</div>
+<div class="g2" style="gap:8px;margin-top:8px">
+<div><b>${a.name} now sees ${b.name}'s private files:</b><div class="ft">${Object.entries(m.reveal.b_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')||'<div class="d">none</div>'}</div></div>
+<div><b>${b.name} now sees ${a.name}'s private files:</b><div class="ft">${Object.entries(m.reveal.a_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')||'<div class="d">none</div>'}</div></div>
+</div></div>`:''}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+<div class="cd"><h3>${a.name}'s Agent <span id="status-a" class="tg tg-b">${m.a_decision}</span></h3>
+<div id="stream-a" class="fd" style="max-height:500px;overflow-y:auto;font-size:11px"><div class="d">Click "Run LLM Agents" to start evaluation</div></div></div>
+<div class="cd"><h3>${b.name}'s Agent <span id="status-b" class="tg tg-b">${m.b_decision}</span></h3>
+<div id="stream-b" class="fd" style="max-height:500px;overflow-y:auto;font-size:11px"><div class="d">Click "Run LLM Agents" to start evaluation</div></div></div>
+</div>
+<div id="match-result-${matchId}" style="margin-top:12px"></div>`;
+sw('match-detail');}
+
+function renderFsTree(nodes,indent=''){if(!nodes)return'';return nodes.map(n=>{const tier=n.tier||'root';const color=tier==='structured'?'var(--teal)':tier==='evaluable'?'var(--gold)':tier==='human_only'?'var(--red)':'var(--dim)';
+if(n.type==='directory'){const ch=n.children?renderFsTree(n.children,indent+'  '):'';return`<div>${indent}<span style="color:${color}">📁 ${n.name}/</span></div>${ch}`;}
+return`<div>${indent}<span style="color:${color}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
+
+// ─── SSE Streaming LLM Evaluation ────────────────
+function streamLLMAgents(matchId){
+const streamA=document.getElementById('stream-a');const streamB=document.getElementById('stream-b');
+const statusA=document.getElementById('status-a');const statusB=document.getElementById('status-b');
+streamA.innerHTML='<div class="e"><span class="i">Starting agent...</span></div>';
+streamB.innerHTML='<div class="e"><span class="i">Starting agent...</span></div>';
+statusA.className='tg tg-g';statusA.textContent='running';
+statusB.className='tg tg-g';statusB.textContent='running';
+
+const evtSource=new EventSource(A+'/api/matches/'+matchId+'/evaluate-stream');
+evtSource.onmessage=function(event){
+const d=JSON.parse(event.data);
+if(d.type==='complete'){
+evtSource.close();
+const s=d.summary;
+const resEl=document.getElementById('match-result-'+matchId);
+resEl.innerHTML=`<div class="cd" style="border:2px solid ${d.mutual_accept?'var(--teal)':'var(--gold)'}">
+<h3 style="font-size:16px">${d.mutual_accept?'MUTUAL MATCH':'Evaluation Complete'}</h3>
+<div class="g2" style="margin-top:8px">
+<div><span style="font-size:28px;font-weight:700;color:${s.agent_a.decision==='accept'?'var(--teal)':'var(--red)'}">${s.agent_a.confidence}%</span> <span class="tg ${s.agent_a.decision==='accept'?'tg-t':'tg-r'}">${s.agent_a.decision}</span> ${s.agent_a.name}<div style="font-size:12px;margin-top:4px">${s.agent_a.reasoning}</div><div class="d" style="font-size:10px">${s.agent_a.tool_calls} tools · ${s.agent_a.files_read} files · ${s.agent_a.tokens.toLocaleString()} tokens · ${(s.agent_a.duration_ms/1000).toFixed(1)}s</div></div>
+<div><span style="font-size:28px;font-weight:700;color:${s.agent_b.decision==='accept'?'var(--teal)':'var(--red)'}">${s.agent_b.confidence}%</span> <span class="tg ${s.agent_b.decision==='accept'?'tg-t':'tg-r'}">${s.agent_b.decision}</span> ${s.agent_b.name}<div style="font-size:12px;margin-top:4px">${s.agent_b.reasoning}</div><div class="d" style="font-size:10px">${s.agent_b.tool_calls} tools · ${s.agent_b.files_read} files · ${s.agent_b.tokens.toLocaleString()} tokens · ${(s.agent_b.duration_ms/1000).toFixed(1)}s</div></div>
+</div></div>`;
+fd('a',`LLM: ${s.agent_a.name}=${s.agent_a.decision}(${s.agent_a.confidence}%) ${s.agent_b.name}=${s.agent_b.decision}(${s.agent_b.confidence}%)`);
+toast(d.mutual_accept?'Mutual match!':'Evaluation done');rf();
+return;}
+
+if(d.type==='error'){evtSource.close();toast('Error: '+d.message);return;}
+
+// Route to the correct agent's stream panel
+const isA=d.agent&&agents.find(x=>x.id&&d.agent===agents[0]?.name);
+// Use agent name to determine which panel
+const panel=(streamA.closest('.cd')?.querySelector('h3')?.textContent||'').includes(d.agent)?streamA:streamB;
+const statusEl=(panel===streamA)?statusA:statusB;
+
+const tc=d.type==='tool_call'?'var(--gold)':d.type==='tool_result'?'var(--teal)':d.type==='thinking'?'var(--dim)':d.type==='decision'?'var(--purple)':'var(--dim)';
+let line='';
+if(d.type==='tool_call'){line=`<span style="color:var(--gold)">→ ${d.tool}</span>(<span class="d">${JSON.stringify(d.input||{}).slice(0,100)}</span>)`;}
+else if(d.type==='tool_result'){line=`<span style="color:var(--teal)">← ${d.tool}</span> <span class="d">${(d.output||'').slice(0,200)}</span>`;}
+else if(d.type==='thinking'){line=`<span style="color:var(--dim)">${(d.message||'').slice(0,300)}</span>`;}
+else if(d.type==='decision'){
+const dec=d.decision;statusEl.className=`tg ${dec.decision==='accept'?'tg-t':'tg-r'}`;statusEl.textContent=dec.decision+' ('+dec.confidence+'%)';
+line=`<span style="color:${dec.decision==='accept'?'var(--teal)':'var(--red)'}"><b>${dec.decision.toUpperCase()}</b> (${dec.confidence}%)</span><br>${dec.recommend_to_human}`;}
+else if(d.type==='done'){line=`<span style="color:var(--teal)"><b>${d.message}</b></span>`;}
+
+if(line){panel.insertAdjacentHTML('beforeend',`<div class="e" style="border-bottom:1px solid rgba(255,255,255,.03);padding:2px 0">${line}</div>`);panel.scrollTop=panel.scrollHeight;}
+};
+evtSource.onerror=()=>{evtSource.close();};}
 
 async function runLLMAgents(matchId){const el=document.getElementById('llm-match-'+matchId);
 el.innerHTML='<div class="lb"><div class="md">Running two LLM delegate agents in parallel...</div><div class="d">Each agent browses both filesystems using tools, then submits accept/decline.</div></div>';
