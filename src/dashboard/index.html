@@ -177,14 +177,25 @@ textarea{resize:vertical;min-height:60px}
   <div class="g2">
     <div class="cd">
       <h3>Extract from Text</h3>
-      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Paste conversation text to extract a profile. PII patterns are redacted before extraction.</p>
-      <textarea id="ext-text" style="min-height:150px" placeholder="Paste conversation text here...
+      <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Paste conversation text to extract a profile. PII is redacted before extraction. If API key is set, uses Claude for deep extraction.</p>
+      <textarea id="ext-text" style="min-height:150px" placeholder="Paste conversation text here. This can be copy-pasted from your Claude Code or ChatGPT conversations.
 
-Example: I've been working with Rust for about 5 years now, mainly building distributed systems. I also use TypeScript for frontend work with React and Next.js. I'm really interested in cryptography and privacy-preserving protocols. My email is jane@example.com and my API key is sk-proj-abc123456789."></textarea>
-      <button class="bt bt-p" onclick="runExtract()" style="margin-top:8px">Extract Profile</button>
+Example: I've been working with Rust for about 5 years now, mainly building distributed systems. I also use TypeScript for frontend work with React and Next.js. I'm really interested in cryptography and privacy-preserving protocols. Previously I was at Stripe building payment infrastructure. My email is jane@example.com and my API key is sk-proj-abc123456789."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="bt bt-p" onclick="runExtract(false)">Extract (keyword)</button>
+        <button class="bt bt-v" onclick="runExtract(true)">Extract (LLM)</button>
+      </div>
+      <div style="margin-top:12px">
+        <h3 style="font-size:13px">Create Agent from Profile</h3>
+        <div class="g2" style="gap:8px;margin-top:6px">
+          <div><label>Agent Name</label><input id="ext-name" placeholder="e.g. Alice"></div>
+          <div><label>Purpose</label><select id="ext-purpose"><option value="recruiting">Recruiting</option><option value="cofounder">Cofounder</option><option value="dating">Dating</option><option value="freelance">Freelance</option></select></div>
+        </div>
+        <button class="bt" onclick="extractAndCreate()" style="margin-top:8px">Extract + Create Agent</button>
+      </div>
     </div>
     <div class="cd">
-      <h3>Extracted Profile</h3>
+      <h3>Extracted Profile <span id="ext-method" class="tg tg-b"></span></h3>
       <div id="ext-result"><p style="color:var(--dim);font-size:12px">Paste text and click Extract</p></div>
     </div>
   </div>
@@ -410,8 +421,8 @@ const a=m.agent_a,b=m.agent_b;
 
 // Load file trees for both agents
 let treeA='loading...',treeB='loading...';
-try{const ra=await fetch(A+'/api/agents/'+a.id+'/files');const da=await ra.json();treeA=renderFsTree(da.tree);}catch{treeA='<div class="d">No files on disk</div>';}
-try{const rb=await fetch(A+'/api/agents/'+b.id+'/files');const db=await rb.json();treeB=renderFsTree(db.tree);}catch{treeB='<div class="d">No files on disk</div>';}
+try{const ra=await fetch(A+'/api/agents/'+a.id+'/files');const da=await ra.json();treeA=renderFsTree(da.tree,a.id,'');}catch{treeA='<div class="d">No files on disk</div>';}
+try{const rb=await fetch(A+'/api/agents/'+b.id+'/files');const db=await rb.json();treeB=renderFsTree(db.tree,b.id,'');}catch{treeB='<div class="d">No files on disk</div>';}
 
 document.getElementById('v-match-detail').innerHTML=`
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -424,11 +435,15 @@ document.getElementById('v-match-detail').innerHTML=`
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
 <div class="cd"><h3 style="color:var(--teal)">${a.name}'s Filesystem</h3>
-<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${b.name}'s delegate reads these files</div>
+<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${b.name}'s delegate reads these files. Click any file to view.</div>
 <div class="ft" style="max-height:300px;overflow-y:auto">${treeA}</div></div>
 <div class="cd"><h3 style="color:var(--purple)">${b.name}'s Filesystem</h3>
-<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${a.name}'s delegate reads these files</div>
+<div style="font-size:11px;color:var(--dim);margin-bottom:6px">${a.name}'s delegate reads these files. Click any file to view.</div>
 <div class="ft" style="max-height:300px;overflow-y:auto">${treeB}</div></div>
+</div>
+<div id="match-file-viewer" style="display:none;margin-bottom:12px" class="cd">
+<h3 id="match-file-title">File Viewer</h3>
+<pre id="match-file-content" style="white-space:pre-wrap;font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--teal);max-height:400px;overflow-y:auto;margin-top:8px"></pre>
 </div>
 
 ${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bottom:12px;border-color:var(--teal)">
@@ -447,9 +462,23 @@ ${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bot
 <div id="match-result-${matchId}" style="margin-top:12px"></div>`;
 sw('match-detail');}
 
-function renderFsTree(nodes,indent=''){if(!nodes)return'';return nodes.map(n=>{const tier=n.tier||'root';const color=tier==='structured'?'var(--teal)':tier==='evaluable'?'var(--gold)':tier==='human_only'?'var(--red)':'var(--dim)';
-if(n.type==='directory'){const ch=n.children?renderFsTree(n.children,indent+'  '):'';return`<div>${indent}<span style="color:${color}">📁 ${n.name}/</span></div>${ch}`;}
-return`<div>${indent}<span style="color:${color}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
+function renderFsTree(nodes,agentId,indent){if(!nodes)return'';return nodes.map(n=>{const tier=n.tier||'root';const color=tier==='structured'?'var(--teal)':tier==='evaluable'?'var(--gold)':tier==='human_only'?'var(--red)':'var(--dim)';
+if(n.type==='directory'){const ch=n.children?renderFsTree(n.children,agentId,indent+'  '):'';return`<div>${indent}<span style="color:${color}">📁 ${n.name}/</span></div>${ch}`;}
+return`<div style="cursor:pointer" onclick="viewMatchFile('${agentId}','${n.path}')" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background='none'">${indent}<span style="color:${color}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
+
+async function viewMatchFile(agentId,filePath){
+const viewer=document.getElementById('match-file-viewer');
+const title=document.getElementById('match-file-title');
+const content=document.getElementById('match-file-content');
+viewer.style.display='block';
+title.innerHTML=`<span style="color:var(--dim)">agents/${agentId.slice(0,16)}/</span>${filePath}`;
+content.textContent='Loading...';
+try{const r=await fetch(A+'/api/agents/'+agentId+'/file?path='+encodeURIComponent(filePath));const d=await r.json();
+if(d.error){content.textContent='Error: '+d.error;content.style.color='var(--red)';return;}
+const isJson=filePath.endsWith('.json');
+content.textContent=isJson?JSON.stringify(JSON.parse(d.content),null,2):d.content;
+content.style.color=filePath.includes('structured')?'var(--teal)':filePath.includes('evaluable')?'var(--gold)':filePath.includes('human_only')?'var(--red)':'var(--text)';
+}catch(e){content.textContent='Error: '+e.message;content.style.color='var(--red)';}}
 
 // ─── SSE Streaming LLM Evaluation ────────────────
 function streamLLMAgents(matchId){
@@ -552,17 +581,41 @@ document.getElementById('derive-result').innerHTML=`<div class="lb"><div class="
 fd('a',`Derived proof: ${disclosed.length} revealed, ${hidden.length} hidden`);toast(d.verified?'Proof verified':'Verification failed');}
 
 // ─── Extract ──────────────────────────────────────
-async function runExtract(){const text=document.getElementById('ext-text').value;if(!text.trim()){toast('Paste some text');return;}
-const r=await fetch(A+'/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});const d=await r.json();const p=d.profile;
+async function runExtract(useLLM){const text=document.getElementById('ext-text').value;if(!text.trim()){toast('Paste some text');return;}
+document.getElementById('ext-method').textContent=useLLM?'LLM...':'keyword';document.getElementById('ext-result').innerHTML='<div class="d">Extracting...</div>';
+const r=await fetch(A+'/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,use_llm:useLLM})});const d=await r.json();const p=d.profile;
+document.getElementById('ext-method').textContent=d.method||'keyword';document.getElementById('ext-method').className=`tg ${d.method==='llm'?'tg-v':'tg-b'}`;
 document.getElementById('ext-result').innerHTML=`
-<div class="ft">${d.redactions.length?`<div style="margin-bottom:8px"><span class="tg tg-r">Redacted: ${d.redactions.map(r=>r.type+' ('+r.count+')').join(', ')}</span></div>`:''}
+<div class="ft">
+${p.metadata?.about?`<div class="lb" style="margin-bottom:12px"><div class="md">About</div><div>${p.metadata.about}</div></div>`:''}
+${d.redactions?.length?`<div style="margin-bottom:8px"><span class="tg tg-r">Redacted: ${d.redactions.map(r=>r.type+' ('+r.count+')').join(', ')}</span></div>`:''}
 <h4 style="color:var(--teal);margin:8px 0">Skills (${p.skills.length})</h4>
-${p.skills.map(s=>`<div><span class="k">${s.name}</span> <div class="bar-track"><div class="bar-fill" style="width:${s.confidence*100}%;background:var(--teal)"></div></div><span class="d">${s.confidence.toFixed(2)} (${s.mentions} mentions)</span></div>`).join('')||'<div class="d">none detected</div>'}
+${p.skills.map(s=>`<div><span class="k">${s.name}</span>${s.proficiency?` <span class="tg tg-t">${s.proficiency}</span>`:''} <div class="bar-track"><div class="bar-fill" style="width:${s.confidence*100}%;background:var(--teal)"></div></div><span class="d">${s.confidence.toFixed(2)}${s.source==='llm-extracted'?' (LLM)':' ('+s.mentions+' mentions)'}</span>${s.evidence?`<div style="font-size:10px;color:var(--dim);margin-left:8px">${s.evidence.slice(0,2).join('; ')}</div>`:''}</div>`).join('')||'<div class="d">none detected</div>'}
 <h4 style="color:var(--gold);margin:8px 0">Interests (${p.interests.length})</h4>
-${p.interests.map(i=>`<div><span class="k">${i.topic}</span> <span class="d">(${i.mentions} mentions)</span></div>`).join('')||'<div class="d">none detected</div>'}
+${p.interests.map(i=>`<div><span class="k">${i.topic}</span> <span class="d">(${i.mentions} mentions, ${i.confidence.toFixed(2)})</span></div>`).join('')||'<div class="d">none detected</div>'}
+${p.values?.length?`<h4 style="color:var(--purple);margin:8px 0">Values (${p.values.length})</h4>${p.values.map(v=>`<span class="tg tg-p">${v}</span>`).join(' ')}`:''}
+${p.career?.domains?.length?`<h4 style="color:var(--blue);margin:8px 0">Domains</h4>${p.career.domains.map(d=>`<span class="tg tg-b">${d}</span>`).join(' ')}`:''}
 <h4 style="color:var(--blue);margin:8px 0">Communication</h4>
 <div><span class="k">Style:</span> <span class="v">${p.communication.verbosity} / ${p.communication.formality} / ${p.communication.technicalDepth}</span></div>
-</div>`;fd('a','Extracted profile: '+p.skills.length+' skills');toast('Profile extracted');}
+<div><span class="k">Career stage:</span> <span class="v">${p.career?.careerStage||'unknown'}</span></div>
+${p.career?.currentRole?`<div><span class="k">Role:</span> <span class="v">${p.career.currentRole}</span></div>`:''}
+</div>`;fd('a','Extracted profile: '+p.skills.length+' skills'+(d.method==='llm'?' (LLM)':' (keyword)'));toast('Profile extracted'+(d.method==='llm'?' via Claude':''));}
+
+async function extractAndCreate(){const text=document.getElementById('ext-text').value;if(!text.trim()){toast('Paste some text');return;}
+const name=document.getElementById('ext-name').value||'Extracted Agent';const purpose=document.getElementById('ext-purpose').value;
+document.getElementById('ext-result').innerHTML='<div class="d">Extracting + creating agent...</div>';
+const r=await fetch(A+'/api/extract-and-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,name,purpose})});const d=await r.json();
+if(d.error){toast('Error: '+d.error);return;}
+const p=d.profile;
+document.getElementById('ext-method').textContent=d.method;
+document.getElementById('ext-result').innerHTML=`
+<div class="lb" style="border-color:var(--teal);margin-bottom:12px"><div class="md">Agent Created!</div><div class="ft"><div><span class="k">Name:</span> <span class="v">${d.agent.name}</span></div><div><span class="k">ID:</span> <span class="v">${d.agent.id}</span></div><div><span class="k">Purpose:</span> <span class="v">${d.agent.purpose}</span></div><div><span class="k">Skills:</span> <span class="v">${d.agent.structured.skills.join(', ')}</span></div></div></div>
+${p.metadata?.about?`<div class="lb" style="margin-bottom:8px"><div class="md">About</div><div>${p.metadata.about}</div></div>`:''}
+<div class="ft"><h4 style="color:var(--teal);margin:8px 0">Skills (${p.skills.length})</h4>
+${p.skills.map(s=>`<div><span class="k">${s.name}</span>${s.proficiency?` <span class="tg tg-t">${s.proficiency}</span>`:''}<div class="bar-track"><div class="bar-fill" style="width:${s.confidence*100}%;background:var(--teal)"></div></div></div>`).join('')}
+${p.values?.length?`<h4 style="color:var(--purple);margin:8px 0">Values</h4>${p.values.map(v=>`<span class="tg tg-p">${v}</span>`).join(' ')}`:''}
+</div>`;
+fd('a',`Created agent ${d.agent.name} from extraction (${d.method})`);toast('Agent created: '+d.agent.name);await rf();}
 
 // ─── Buckets ──────────────────────────────────────
 async function loadBuckets(){const r=await fetch(A+'/api/buckets');const{buckets}=await r.json();
@@ -712,8 +765,9 @@ try{const r=await fetch(A+'/api/agents/'+id+'/files');const d=await r.json();
 el.innerHTML=`<div class="lb"><div class="md">File Tree (on disk)</div><div class="ft">${renderTree(d.tree,'')}</div></div>`;
 }catch(e){el.innerHTML=`<div class="lb"><div class="md">No files on disk</div><div class="d">Agent data is in memory only</div></div>`;}}
 
-function renderTree(nodes,indent){return nodes.map(n=>{if(n.type==='directory'){const ch=n.children?renderTree(n.children,indent+'  '):'';return`<div>${indent}<span style="color:var(--gold)">📁 ${n.name}/</span></div>${ch}`;}
-return`<div style="cursor:pointer" onclick="viewFileById('${n.path}')">${indent}<span style="color:${n.tier==='structured'?'var(--teal)':n.tier==='evaluable'?'var(--gold)':n.tier==='human_only'?'var(--red)':'var(--dim)'}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
+function renderTree(nodes,indent){return nodes.map(n=>{const color=n.tier==='structured'?'var(--teal)':n.tier==='evaluable'?'var(--gold)':n.tier==='human_only'?'var(--red)':'var(--dim)';
+if(n.type==='directory'){const ch=n.children?renderTree(n.children,indent+'  '):'';return`<div>${indent}<span style="color:${color}">📁 ${n.name}/</span></div>${ch}`;}
+return`<div>${indent}<span style="color:${color}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
 
 async function viewFile(id,path){const el=document.getElementById('file-content-'+id);el.innerHTML='<div class="lb"><div class="md">Loading '+path+'...</div></div>';
 try{const r=await fetch(A+'/api/agents/'+id+'/file?path='+encodeURIComponent(path));const d=await r.json();
@@ -736,19 +790,48 @@ function clearAll(){agents.forEach(a=>fetch(A+'/api/agents/'+a.id,{method:'DELET
 // ─── Add Agent Modal ──────────────────────────────
 function openAdd(){document.getElementById('modal').innerHTML=`
 <h3>Add Agent</h3>
-<label>Name</label><input id="m-n" value="Agent-${agents.length+1}">
-<label>Purpose</label><select id="m-p"><option value="recruiting">Recruiting</option><option value="cofounder">Cofounder</option><option value="dating">Dating</option><option value="freelance">Freelance</option></select>
-<label>Skills (comma-separated)</label><input id="m-s" placeholder="rust, typescript">
-<label>Experience Band</label><select id="m-e"><option value="1-3yr">1-3yr</option><option value="3-5yr" selected>3-5yr</option><option value="5-10yr">5-10yr</option><option value="10+yr">10+yr</option></select>
-<label>About (Tier 2 — evaluable text)</label><textarea id="m-a" placeholder="Description..."></textarea>
-<label>Notes (Tier 3 — human only)</label><textarea id="m-h" placeholder="Private notes..."></textarea>
-<div style="display:flex;gap:8px;margin-top:16px"><button class="bt bt-p" onclick="submitAdd()">Add</button><button class="bt" onclick="closeM()">Cancel</button></div>`;
+<div class="g2" style="gap:8px;margin-bottom:8px">
+<div><label>Name</label><input id="m-n" value="Agent-${agents.length+1}"></div>
+<div><label>Purpose</label><select id="m-p"><option value="recruiting">Recruiting</option><option value="cofounder">Cofounder</option><option value="dating">Dating</option><option value="freelance">Freelance</option></select></div>
+</div>
+<label>Paste conversation text <span style="color:var(--dim);font-size:10px">(skills, about, etc. are extracted automatically)</span></label>
+<textarea id="m-text" style="min-height:120px" placeholder="Paste any conversation text here. The system will automatically extract skills, interests, values, career stage, and a summary.
+
+Example: I've been building distributed systems in Rust for about 7 years. Previously at Stripe working on payment infrastructure. I'm passionate about privacy-preserving technology and cryptographic protocols. Currently looking for a cofounder to build an agent communication platform."></textarea>
+<label>Private notes <span style="color:var(--dim);font-size:10px">(human_only — never seen by any agent)</span></label>
+<textarea id="m-h" style="min-height:40px" placeholder="e.g. Salary expectations, personal preferences..."></textarea>
+<div id="m-status" style="margin-top:8px"></div>
+<div style="display:flex;gap:8px;margin-top:12px">
+<button class="bt bt-p" onclick="submitExtractAdd()">Create Agent</button>
+<button class="bt" onclick="closeM()">Cancel</button>
+</div>`;
 document.getElementById('mbg').classList.add('on');}
 
-async function submitAdd(){const n=document.getElementById('m-n').value||'Agent';const p=document.getElementById('m-p').value;const s=document.getElementById('m-s').value.split(',').map(x=>x.trim()).filter(Boolean);const e=document.getElementById('m-e').value;const a=document.getElementById('m-a').value;const h=document.getElementById('m-h').value;
-if(!s.length){toast('Add skills');return;}
-await fetch(A+'/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,purpose:p,skills:s,experienceBand:e,evaluable_text:a?{about:a}:undefined,human_only:h?{notes:h}:undefined})});
-fd('a',n+' joined '+p);await rf();closeM();toast(n+' added');}
+async function submitExtractAdd(){
+const n=document.getElementById('m-n').value||'Agent';
+const p=document.getElementById('m-p').value;
+const text=document.getElementById('m-text').value;
+const h=document.getElementById('m-h').value;
+const statusEl=document.getElementById('m-status');
+
+if(!text.trim()){toast('Paste some conversation text');return;}
+
+statusEl.innerHTML='<div class="d">Extracting profile...</div>';
+
+const r=await fetch(A+'/api/extract-and-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,name:n,purpose:p,human_only_notes:h})});
+const d=await r.json();
+
+if(d.error){statusEl.innerHTML=`<div style="color:var(--red)">${d.error}</div>`;return;}
+
+const skills=d.agent.structured.skills||[];
+statusEl.innerHTML=`<div class="lb" style="border-color:var(--teal)"><div class="md">Agent Created (${d.method})</div>
+<div class="ft"><div><span class="k">Skills:</span> <span class="v">${skills.join(', ')}</span></div>
+${d.profile.metadata?.about?`<div><span class="k">About:</span> <span class="v">${d.profile.metadata.about}</span></div>`:''}
+${d.profile.values?.length?`<div><span class="k">Values:</span> <span class="v">${d.profile.values.join(', ')}</span></div>`:''}
+</div></div>`;
+
+fd('a',n+' created from extraction ('+d.method+')');await rf();
+setTimeout(()=>{closeM();toast(n+' added with '+skills.length+' skills');},1500);}
 
 function closeM(){document.getElementById('mbg').classList.remove('on');}
 

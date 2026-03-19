@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import { AGENTVERSE_DIR } from "./init.js";
 import { parseClaudeCodeFile, findClaudeCodeFiles } from "../extractor/claude-code-parser.js";
 import { parseChatGPTFile } from "../extractor/chatgpt-parser.js";
-import { extractProfile } from "../extractor/pipeline.js";
+import { extractProfile, extractProfileWithLLM } from "../extractor/pipeline.js";
 import { encryptAndStore, writeJsonFile, isWalletInitialized } from "../wallet/storage.js";
 import type { NormalizedConversation } from "../extractor/types.js";
 
@@ -14,6 +14,8 @@ export const extractCommand = new Command("extract")
   .option("--source <path>", "Path to conversation export file")
   .option("--format <type>", "Source format: claude-code | chatgpt (auto-detected if omitted)")
   .option("--dry-run", "Show detected sources without running extraction")
+  .option("--llm", "Use Claude API for deep extraction (requires ANTHROPIC_API_KEY)")
+  .option("--model <model>", "LLM model to use for extraction", "claude-sonnet-4-20250514")
   .action(async (options) => {
     const basePath = AGENTVERSE_DIR;
     const allConversations: NormalizedConversation[] = [];
@@ -88,11 +90,36 @@ export const extractCommand = new Command("extract")
     }
 
     // Run extraction pipeline
-    const profile = extractProfile(allConversations);
+    let profile;
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (options.llm || (apiKey && !options.source)) {
+      if (!apiKey) {
+        console.log("  --llm requires ANTHROPIC_API_KEY to be set in .env");
+        console.log("  Falling back to keyword extraction...\n");
+        profile = extractProfile(allConversations);
+      } else {
+        console.log("  Using Claude API for deep extraction...\n");
+        profile = await extractProfileWithLLM(
+          allConversations,
+          apiKey,
+          (msg) => console.log(`  ${msg}`),
+          options.model
+        );
+      }
+    } else {
+      profile = extractProfile(allConversations);
+    }
 
     console.log(`\n  Extracted ${profile.skills.length} skills`);
     console.log(`  Extracted ${profile.interests.length} interests`);
     console.log(`  From ${profile.metadata.conversationCount} conversations`);
+    if (profile.metadata.extractionMethod === "llm") {
+      console.log(`  Method: LLM (${profile.metadata.chunksProcessed} chunks)`);
+      if (profile.metadata.about) {
+        console.log(`\n  About: ${profile.metadata.about}`);
+      }
+    }
 
     // Save profile
     const profilePath = path.join(basePath, "profile.json");

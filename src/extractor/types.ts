@@ -29,7 +29,9 @@ export interface SkillEntry {
   mentions: number;
   firstSeen: string;
   lastSeen: string;
-  source: "explicit" | "inferred" | "behavioral";
+  source: "explicit" | "inferred" | "behavioral" | "llm-extracted";
+  proficiency?: string;
+  evidence?: string[];
 }
 
 export interface InterestEntry {
@@ -49,6 +51,7 @@ export interface CareerContext {
   industry?: string;
   careerStage: "student" | "early-career" | "mid-career" | "senior" | "executive";
   teamContext?: string;
+  domains?: string[];
 }
 
 export interface DemographicsEntry {
@@ -68,5 +71,9 @@ export interface ExtractedProfile {
     extractedAt: string;
     conversationCount: number;
     sourceBreakdown: Record<string, number>;
+    extractionMethod?: "keyword" | "llm";
+    chunksProcessed?: number;
+    about?: string;
+    totalTokensProcessed?: number;
   };
 }

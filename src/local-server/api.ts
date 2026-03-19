@@ -841,10 +841,10 @@ Rate compatibility. Respond with ONLY valid JSON:
   // ─── Profile Extraction ─────────────────────────────────
 
   app.post("/api/extract", async (req, res) => {
-    const { text, source } = req.body;
+    const { text, source, use_llm } = req.body;
     try {
       const { redact } = await import("../extractor/redaction.js");
-      const { extractProfile } = await import("../extractor/pipeline.js");
+      const { extractProfile, extractProfileWithLLM } = await import("../extractor/pipeline.js");
 
       // Create a synthetic conversation from pasted text
       const redacted = redact(text || "");
@@ -861,8 +861,73 @@ Rate compatibility. Respond with ONLY valid JSON:
         endTime: Date.now(),
       }];
 
-      const profile = extractProfile(conversations);
-      res.json({ profile, redactions: redacted.redactions });
+      let profile;
+      const apiKey = getApiKey();
+
+      if (use_llm && apiKey) {
+        profile = await extractProfileWithLLM(conversations, apiKey);
+      } else {
+        profile = extractProfile(conversations);
+      }
+
+      res.json({ profile, redactions: redacted.redactions, method: use_llm && apiKey ? "llm" : "keyword" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Extract + auto-create agent from profile
+  app.post("/api/extract-and-create", async (req, res) => {
+    const { text, name, purpose, human_only_notes } = req.body;
+    try {
+      const { redact } = await import("../extractor/redaction.js");
+      const { extractProfile, extractProfileWithLLM } = await import("../extractor/pipeline.js");
+      const { generateLocalEmbedding } = await import("../discovery/embeddings.js");
+
+      const redacted = redact(text || "");
+      const conversations = [{
+        id: "dashboard-input",
+        messages: [{ role: "user" as const, content: redacted.text, timestamp: Date.now(), source: "claude-code" as const }],
+        source: "claude-code" as const, startTime: Date.now(), endTime: Date.now(),
+      }];
+
+      const apiKey = getApiKey();
+      const profile = apiKey
+        ? await extractProfileWithLLM(conversations, apiKey)
+        : extractProfile(conversations);
+
+      // Create agent from extracted profile
+      const agentName = name || "Extracted Agent";
+      const agentPurpose = purpose || "recruiting";
+      const bucketMap: Record<string, string> = { recruiting: "recruiting-swe", cofounder: "cofounder-search", dating: "dating-general", freelance: "freelance-dev" };
+      const bucketId = bucketMap[agentPurpose] || "recruiting-swe";
+      const did = `did:key:${agentName.toLowerCase().replace(/\s+/g, "-")}-${Date.now().toString(36)}`;
+      const id = `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+      const structured: Record<string, any> = {
+        skills: profile.skills.map(s => s.name),
+        experienceBand: profile.career.careerStage === "senior" ? "10+yr" : profile.career.careerStage === "mid-career" ? "5-10yr" : "1-3yr",
+      };
+      if (profile.values.length > 0) structured.values = profile.values;
+      if (profile.career.domains?.length) structured.domains = profile.career.domains;
+
+      const evaluable_text: Record<string, string> = {};
+      if (profile.metadata.about) evaluable_text.about = profile.metadata.about;
+
+      const human_only: Record<string, string> = {};
+      if (profile.career.currentRole) human_only.currentRole = profile.career.currentRole;
+      if (human_only_notes) human_only.notes = human_only_notes;
+
+      writeAgentFilesystem(agentBaseDir, id, { name: agentName, purpose: agentPurpose, did, structured, evaluable_text, human_only });
+
+      const filesystem = { purpose: agentPurpose, created_at: new Date().toISOString(), owner_did: did, structured, evaluable_text, human_only };
+      const embedding = generateLocalEmbedding(structured);
+      const listing = venue.submit(bucketId, filesystem, embedding);
+
+      const agent = { id, name: agentName, did, purpose: agentPurpose, bucketId, listingId: listing.id, structured, evaluable_text, human_only, personas: [agentPurpose], relationships: [], reputation: { overall: 50, tier: "new" }, created_at: new Date().toISOString() };
+      agentRegistry.set(id, agent);
+
+      res.json({ profile, agent, method: apiKey ? "llm" : "keyword" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

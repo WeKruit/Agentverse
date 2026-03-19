@@ -35,8 +35,11 @@ program.addCommand(keysCommand);
 program.addCommand(discoverCommand);
 program.addCommand(matchCommand);
 
-// Local server
+// Local server + demo
 program.addCommand(serveCommand);
+
+import { demoCommand } from "./commands/demo.js";
+program.addCommand(demoCommand);
 
 // Phase 2+ stubs
 program
