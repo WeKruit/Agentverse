@@ -131,11 +131,16 @@ textarea{resize:vertical;min-height:60px}
 <!-- ═══ Matches ═══ -->
 <div class="vw" id="v-matches">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:18px">Match Proposals</h2>
-    <button class="bt bt-v" onclick="matchAll()">Run Matching</button>
+    <h2 style="font-size:18px">Matches</h2>
+    <div style="display:flex;gap:8px">
+      <button class="bt bt-v" onclick="matchAll()">Run Matching</button>
+    </div>
   </div>
   <div id="pr-list"></div>
 </div>
+
+<!-- ═══ Match Detail (expanded view with file trees + agent streams) ═══ -->
+<div class="vw" id="v-match-detail"></div>
 
 <!-- ═══ Wallet ═══ -->
 <div class="vw" id="v-wallet">
@@ -325,15 +330,18 @@ document.getElementById('v-agent-detail').innerHTML=`
 <div class="cd"><h3>Reputation <span class="tg ${rp.tier==='new'?'tg-b':rp.tier==='gold'||rp.tier==='platinum'?'tg-g':'tg-t'}">${rp.tier}</span></h3>
 <div style="font-size:32px;font-weight:700;color:${col};margin:8px 0">${rp.overall}/100</div>
 <div class="ft">${Object.entries(rp.components||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${typeof v==='number'?(v*100).toFixed(0)+'%':v}</span><div class="bar-track"><div class="bar-fill" style="width:${(typeof v==='number'?v*100:50)}%;background:${col}"></div></div></div>`).join('')}</div></div>
-<div class="cd" style="grid-column:span 2"><h3>Delegate Filesystem (Three-Tier)</h3>
+<div class="cd" style="grid-column:span 2"><h3>Agent Filesystem <span class="tg tg-t">${fs.source||'memory'}</span> <button class="bt bt-s" onclick="loadFileTree('${id}')">View File Tree</button></h3>
 <div class="g3">
-<div class="tier-box"><h4><span class="tg tg-t">Tier 1: structured</span> <span style="font-size:10px;color:var(--dim)">LLM-safe</span></h4>
-<div class="ft">${Object.entries(fs.structured||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${Array.isArray(v)?v.join(', '):v}</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
-<div class="tier-box"><h4><span class="tg tg-g">Tier 2: evaluable_text</span> <span style="font-size:10px;color:var(--dim)">defense stack</span></h4>
-<div class="ft">${Object.entries(fs.evaluable_text||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
-<div class="tier-box"><h4><span class="tg tg-r">Tier 3: human_only</span> <span style="font-size:10px;color:var(--dim)">never by LLM</span></h4>
-<div class="ft">${Object.entries(fs.human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
-</div></div>
+<div class="tier-box"><h4><span class="tg tg-t">structured/</span> <span style="font-size:10px;color:var(--dim)">JSON files · LLM-safe</span></h4>
+<div class="ft">${Object.entries(fs.structured||{}).map(([k,v])=>`<div style="cursor:pointer" onclick="viewFile('${id}','structured/${k}.json')"><span class="k">${k}.json</span> <span class="v">${Array.isArray(v)?v.join(', '):typeof v==='object'?JSON.stringify(v):v}</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-g">evaluable/</span> <span style="font-size:10px;color:var(--dim)">.txt files · dimensional scoring</span></h4>
+<div class="ft">${Object.entries(fs.evaluable_text||{}).map(([k,v])=>`<div style="cursor:pointer" onclick="viewFile('${id}','evaluable/${k}.txt')"><span class="k">${k}.txt</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+<div class="tier-box"><h4><span class="tg tg-r">human_only/</span> <span style="font-size:10px;color:var(--dim)">.txt files · never scored</span></h4>
+<div class="ft">${Object.entries(fs.human_only||{}).map(([k,v])=>`<div style="cursor:pointer" onclick="viewFile('${id}','human_only/${k}.txt')"><span class="k">${k}.txt</span> <span class="v">"${String(v).slice(0,100)}"</span></div>`).join('')||'<div class="d">empty</div>'}</div></div>
+</div>
+<div id="file-tree-${id}" style="margin-top:12px"></div>
+<div id="file-content-${id}" style="margin-top:12px"></div>
+</div>
 <div class="cd"><h3>Personas <button class="bt bt-s" onclick="addPersona('${id}')">+ Add</button></h3>
 <div>${(ag.personas||[]).map(p=>`<span class="tg tg-t">${p}</span>`).join(' ')||'<span class="d">none</span>'}</div></div>
 <div class="cd"><h3>LLM Evaluation</h3><div id="llm-${id}"><p class="d" style="font-size:12px">Click "LLM Score" to run AI compatibility evaluation</p></div></div>
@@ -346,36 +354,100 @@ try{const r=await fetch(A+'/api/score',{method:'POST',headers:{'Content-Type':'a
 el.innerHTML=`<div class="lb"><div class="md">${d.method} — vs ${tgt.name}</div><div><span class="sg sg-${s.signal?s.signal[0]:'p'}">${s.signal||'N/A'}</span></div>${s.matched_on?`<div style="margin-top:6px"><b>Matched:</b> ${s.matched_on.join(', ')}</div>`:''}${s.gaps?`<div><b>Gaps:</b> ${s.gaps.join(', ')}</div>`:''}${s.summary?`<div style="margin-top:6px">${s.summary}</div>`:''}${s.reasoning?`<div style="margin-top:4px;color:var(--dim);font-size:11px">${s.reasoning}</div>`:''}${s.recommend_escalate!==undefined?`<div style="margin-top:6px"><b>Escalate:</b> ${s.recommend_escalate?'Yes':'No'}</div>`:''}</div>`;}catch(e){el.innerHTML=`<div class="lb"><div class="md">Error</div><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Matches ──────────────────────────────────────
-async function loadProps(){const r=await fetch(A+'/api/proposals');const{proposals}=await r.json();const el=document.getElementById('pr-list');
-if(!proposals.length){el.innerHTML='<div class="em"><h3>No Proposals</h3><p>Run matching to generate proposals</p><button class="bt bt-v" onclick="matchAll()">Run Matching</button></div>';return;}
-el.innerHTML=proposals.map(p=>{
-const on=p.owner_name||'Unknown';const pn=p.peer_name||'Unknown';
+async function loadProps(){const r=await fetch(A+'/api/matches');const{matches:mlist}=await r.json();const el=document.getElementById('pr-list');
+if(!mlist.length){el.innerHTML='<div class="em"><h3>No Matches</h3><p>Run matching to find compatible agents</p><button class="bt bt-v" onclick="matchAll()">Run Matching</button></div>';return;}
 const sc=s=>s==='strong'?'sg-s':s==='good'?'sg-g':s==='possible'?'sg-p':'sg-w';
-return`<div class="cd" style="border-left:3px solid ${p.signal==='strong'?'var(--teal)':p.signal==='good'?'var(--blue)':p.signal==='possible'?'var(--gold)':'var(--red)'}">
-<h3 style="font-size:15px">${on} <span style="color:var(--dim);font-weight:400">→ matched with →</span> ${pn}</h3>
+const stc=s=>s==='proposed'?'tg-b':s==='accepted'?'tg-g':s==='mutual'||s==='connected'?'tg-t':s==='declined'?'tg-r':'tg-b';
+el.innerHTML=mlist.map(m=>{
+const a=m.agent_a,b=m.agent_b,s=m.scoring;
+const col=s.a_scores_b.signal==='strong'?'var(--teal)':s.a_scores_b.signal==='good'?'var(--blue)':s.a_scores_b.signal==='possible'?'var(--gold)':'var(--red)';
+return`<div class="cd" style="border-left:3px solid ${col}">
+<h3 style="font-size:15px">${a.name} <span style="color:var(--dim);font-weight:400">↔</span> ${b.name} <span class="tg ${stc(m.status)}">${m.status}</span></h3>
 <div style="display:flex;gap:16px;margin:10px 0">
 <div style="flex:1;padding:10px;background:rgba(93,202,165,.05);border-radius:6px">
-<div style="font-size:10px;color:var(--dim);margin-bottom:4px">FOR: ${on}</div>
-<div style="font-size:12px">You matched with <b>${pn}</b></div>
-<div style="font-size:11px;color:var(--dim);margin-top:4px">Their skills: ${(p.peer_structured?.skills||[]).map(s=>'<span class="tg tg-t">'+s+'</span>').join(' ')||'N/A'}</div>
-${p.peer_structured?.experienceBand?`<div style="font-size:11px;color:var(--dim)">Experience: ${p.peer_structured.experienceBand}</div>`:''}
+<div style="font-size:10px;color:var(--dim);margin-bottom:4px">${a.name}'s delegate scores ${b.name}:</div>
+<span class="sg ${sc(s.a_scores_b.signal)}">${s.a_scores_b.signal}</span>
+<div style="font-size:11px;color:var(--dim);margin-top:4px">Matched: ${s.a_scores_b.matched_on.join(', ')||'none'}</div>
+${s.a_scores_b.summary?`<div style="font-size:11px;color:var(--dim)">${s.a_scores_b.summary.slice(0,120)}</div>`:''}
+<div style="font-size:10px;margin-top:4px"><span class="tg ${m.a_decision==='accepted'?'tg-t':m.a_decision==='declined'?'tg-r':'tg-b'}">${a.name}: ${m.a_decision}</span></div>
+</div>
+<div style="flex:1;padding:10px;background:rgba(175,169,236,.05);border-radius:6px">
+<div style="font-size:10px;color:var(--dim);margin-bottom:4px">${b.name}'s delegate scores ${a.name}:</div>
+<span class="sg ${sc(s.b_scores_a.signal)}">${s.b_scores_a.signal}</span>
+<div style="font-size:11px;color:var(--dim);margin-top:4px">Matched: ${s.b_scores_a.matched_on.join(', ')||'none'}</div>
+${s.b_scores_a.summary?`<div style="font-size:11px;color:var(--dim)">${s.b_scores_a.summary.slice(0,120)}</div>`:''}
+<div style="font-size:10px;margin-top:4px"><span class="tg ${m.b_decision==='accepted'?'tg-t':m.b_decision==='declined'?'tg-r':'tg-b'}">${b.name}: ${m.b_decision}</span></div>
 </div>
 </div>
-<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">
-<span class="sg ${sc(p.signal)}">${p.signal}</span>
-<span style="font-size:11px;color:var(--dim)">Matched on: ${p.matched_on.join(', ')||'N/A'}</span>
-${p.gaps.length?`<span style="font-size:11px;color:var(--red)">Gaps: ${p.gaps.join(', ')}</span>`:''}
-</div>
-<div style="font-size:10px;color:var(--dim);margin-bottom:8px">Bucket: ${p.bucket_id} · Expires: ${new Date(p.expires_at).toLocaleString()}</div>
+${m.status==='proposed'||m.status==='accepted'?`<div style="display:flex;gap:8px;margin-bottom:8px">
+${m.a_decision==='pending'?`<button class="bt bt-p bt-s" onclick="doAccept('${m.id}','${a.id}')">${a.name} Accepts</button><button class="bt bt-s bt-d" onclick="doDecline('${m.id}','${a.id}')">${a.name} Declines</button>`:''}
+${m.b_decision==='pending'?`<button class="bt bt-v bt-s" onclick="doAccept('${m.id}','${b.id}')">${b.name} Accepts</button><button class="bt bt-s bt-d" onclick="doDecline('${m.id}','${b.id}')">${b.name} Declines</button>`:''}
+</div>`:''}
+${m.status==='mutual'||m.status==='connected'?`<div class="lb" style="margin-bottom:8px">
+<div class="md">MUTUAL MATCH — Reveal Unlocked</div>
+<div class="g2" style="gap:8px">
+<div><b>${a.name} sees ${b.name}'s private data:</b><div class="ft">${Object.entries(m.reveal.b_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')}</div><div style="font-size:10px;color:var(--dim)">DID: ${m.reveal.b_real_did}</div></div>
+<div><b>${b.name} sees ${a.name}'s private data:</b><div class="ft">${Object.entries(m.reveal.a_human_only||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('')}</div><div style="font-size:10px;color:var(--dim)">DID: ${m.reveal.a_real_did}</div></div>
+</div></div>
+<div style="margin-bottom:8px">
+<div style="font-size:11px;font-weight:600;margin-bottom:6px">Messages (${m.messages.length})</div>
+${m.messages.map(msg=>`<div style="padding:4px 8px;margin:2px 0;background:${msg.from==='a'?'rgba(93,202,165,.08)':'rgba(175,169,236,.08)'};border-radius:4px;font-size:12px"><b>${msg.from==='a'?a.name:b.name}:</b> ${msg.content} <span style="color:var(--dim);font-size:10px">${new Date(msg.timestamp).toLocaleTimeString()}</span></div>`).join('')}
+<div style="display:flex;gap:8px;margin-top:8px">
+<input id="msg-${m.id}" placeholder="Type a message..." style="flex:1">
+<button class="bt bt-s" onclick="sendMsg('${m.id}','${a.id}')">Send as ${a.name}</button>
+<button class="bt bt-s bt-v" onclick="sendMsg('${m.id}','${b.id}')">Send as ${b.name}</button>
+</div></div>`:''}
 <div style="display:flex;gap:8px">
-<button class="bt bt-p bt-s" onclick="acceptP('${p.id}')">Accept Match</button>
-<button class="bt bt-s bt-d" onclick="declineP('${p.id}')">Decline</button>
-</div></div>`;}).join('');}
+<button class="bt bt-p bt-s" onclick="runLLMAgents('${m.id}')">Run LLM Agents</button>
+<button class="bt bt-s" onclick="llmScoreMatch('${m.id}')">LLM Re-Score</button>
+<div style="font-size:10px;color:var(--dim);display:flex;align-items:center">Method: ${s.method}${s.files_read?' · '+s.files_read.length+' files read':''} · Expires: ${new Date(m.expires_at).toLocaleString()}</div>
+</div>
+<div id="llm-match-${m.id}" style="margin-top:8px"></div>
+</div>`;}).join('');}
 
-async function acceptP(id){const r=await fetch(A+'/api/proposals/'+id+'/accept',{method:'POST'});const d=await r.json();fd('a','Match accepted — communication created');toast('Match accepted! View in Comms tab');await rf();loadProps();
-// Add connection line for the canvas
-if(d.proposal){conns.push({f:id,t:id+'b',s:'strong',o:Math.random()});}}
-async function declineP(id){await fetch(A+'/api/proposals/'+id+'/decline',{method:'POST'});fd('r','Declined '+id.slice(0,12));await rf();loadProps();}
+async function doAccept(matchId,agentId){const r=await fetch(A+'/api/matches/'+matchId+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agentId})});const d=await r.json();
+if(d.mutual){fd('a','MUTUAL MATCH! '+d.match.agent_a.name+' ↔ '+d.match.agent_b.name);toast('Mutual match! Human-only data revealed.');conns.push({f:d.match.agent_a.id,t:d.match.agent_b.id,s:'strong',o:Math.random()});}
+else{fd('i',d.message);toast(d.message);}
+await rf();loadProps();}
+
+async function doDecline(matchId,agentId){await fetch(A+'/api/matches/'+matchId+'/decline',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agentId})});fd('r','Match declined');toast('Declined');await rf();loadProps();}
+
+async function sendMsg(matchId,agentId){const inp=document.getElementById('msg-'+matchId);const content=inp.value.trim();if(!content)return;
+await fetch(A+'/api/matches/'+matchId+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agentId,content})});
+inp.value='';fd('i','Message sent');loadProps();}
+
+async function runLLMAgents(matchId){const el=document.getElementById('llm-match-'+matchId);
+el.innerHTML='<div class="lb"><div class="md">Running two LLM delegate agents in parallel...</div><div class="d">Each agent browses both filesystems using tools, then submits accept/decline.</div></div>';
+try{const r=await fetch(A+'/api/matches/'+matchId+'/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const d=await r.json();
+if(d.error){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${d.error}</div></div>`;return;}
+const s=d.summary;
+el.innerHTML=`<div class="cd" style="border:1px solid ${d.result.mutual_accept?'var(--teal)':'var(--gold)'}">
+<h3>${d.result.mutual_accept?'MUTUAL MATCH — Both agents accepted!':'Agents evaluated — '+(!s.mutual_accept?'not mutual':'')}</h3>
+<div class="g2" style="margin-top:12px">
+<div class="tier-box"><h4><span class="tg ${s.agent_a.decision==='accept'?'tg-t':'tg-r'}">${s.agent_a.decision.toUpperCase()}</span> ${s.agent_a.name}'s Agent</h4>
+<div style="font-size:24px;font-weight:700;color:${s.agent_a.decision==='accept'?'var(--teal)':'var(--red)'}"> ${s.agent_a.confidence}%</div>
+<div style="font-size:12px;margin:8px 0">${s.agent_a.reasoning}</div>
+<div class="ft"><div><span class="k">Tool calls:</span> <span class="v">${s.agent_a.tool_calls}</span></div>
+<div><span class="k">Files read:</span> <span class="v">${s.agent_a.files_read}</span></div>
+<div><span class="k">Tokens:</span> <span class="v">${s.agent_a.tokens.toLocaleString()}</span></div>
+<div><span class="k">Duration:</span> <span class="v">${(s.agent_a.duration_ms/1000).toFixed(1)}s</span></div></div></div>
+<div class="tier-box"><h4><span class="tg ${s.agent_b.decision==='accept'?'tg-t':'tg-r'}">${s.agent_b.decision.toUpperCase()}</span> ${s.agent_b.name}'s Agent</h4>
+<div style="font-size:24px;font-weight:700;color:${s.agent_b.decision==='accept'?'var(--teal)':'var(--red)'}">${s.agent_b.confidence}%</div>
+<div style="font-size:12px;margin:8px 0">${s.agent_b.reasoning}</div>
+<div class="ft"><div><span class="k">Tool calls:</span> <span class="v">${s.agent_b.tool_calls}</span></div>
+<div><span class="k">Files read:</span> <span class="v">${s.agent_b.files_read}</span></div>
+<div><span class="k">Tokens:</span> <span class="v">${s.agent_b.tokens.toLocaleString()}</span></div>
+<div><span class="k">Duration:</span> <span class="v">${(s.agent_b.duration_ms/1000).toFixed(1)}s</span></div></div></div>
+</div></div>`;
+fd('a',`LLM agents: ${s.agent_a.name}=${s.agent_a.decision}(${s.agent_a.confidence}%) ${s.agent_b.name}=${s.agent_b.decision}(${s.agent_b.confidence}%)`);
+toast(d.result.mutual_accept?'Mutual match!':'Evaluation complete');await rf();loadProps();
+}catch(e){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${e.message}</div></div>`;}}
+
+async function llmScoreMatch(matchId){const el=document.getElementById('llm-match-'+matchId);el.innerHTML='<div class="lb"><div class="md">Running Claude evaluation...</div></div>';
+try{const r=await fetch(A+'/api/matches/'+matchId+'/llm-score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const d=await r.json();
+if(d.error){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${d.error}</div></div>`;return;}
+el.innerHTML=`<div class="lb"><div class="md">Claude Evaluation Complete</div><div style="color:var(--dim);font-size:11px">Scoring upgraded to LLM</div></div>`;
+fd('a','LLM re-scored match '+matchId.slice(0,12));toast('LLM scoring complete');loadProps();}catch(e){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Wallet ───────────────────────────────────────
 async function walletInit(){const r=await fetch(A+'/api/wallet/init',{method:'POST'});const d=await r.json();walletKeys=d.exported;
@@ -542,15 +614,31 @@ async function gdprErase(){if(!confirm('This will delete ALL data. Are you sure?
 document.getElementById('gdpr-erase').innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div class="md" style="color:var(--red)">Data Erased</div><div class="ft"><div><span class="k">Agents deleted:</span> <span class="v">${d.agents_deleted}</span></div></div></div>`;fd('r','All data erased (GDPR Article 17)');toast('Data erased');}
 
 // ─── Actions ──────────────────────────────────────
-async function matchAll(){fd('i','Running matching engine...');conns=[];
-const r=await fetch(A+'/api/match-all',{method:'POST'});const d=await r.json();
-for(const m of d.matches){mc++;conns.push({f:m.listing_a_id||m.agent_id,t:m.listing_b_id,s:m.signal,o:Math.random()});fd('m',`${m.signal.toUpperCase()}: ${(m.matched_on||[]).join(', ')}`);}
-const rm=document.getElementById('r-matches');rm.innerHTML=d.matches.slice(0,5).map(m=>`<div style="font-size:11px;padding:2px 0"><span class="sg sg-${m.signal[0]}">${m.signal}</span> ${(m.matched_on||[]).slice(0,2).join(', ')}</div>`).join('')||'<p class="d" style="font-size:12px">No matches</p>';
-rf();toast(`${d.matches.length} matches, ${d.proposals.length} proposals`);}
+async function matchAll(){fd('i','Running matching engine (file-based scoring)...');
+const r=await fetch(A+'/api/matches/run',{method:'POST'});const d=await r.json();
+for(const m of d.matches){conns.push({f:m.agent_a,t:m.agent_b,s:m.signal_ab,o:Math.random()});fd('m',`${m.agent_a} ↔ ${m.agent_b}: ${m.signal_ab} | ${m.matched_on.join(', ')} [${m.method}]`);}
+const rm=document.getElementById('r-matches');rm.innerHTML=d.matches.slice(0,5).map(m=>`<div style="font-size:11px;padding:2px 0"><span class="sg sg-${m.signal_ab[0]}">${m.signal_ab}</span> ${m.agent_a} ↔ ${m.agent_b}</div>`).join('')||'<p class="d" style="font-size:12px">No matches</p>';
+await rf();toast(`${d.matches_created} matches created`);}
 
 async function delAgent(id){await fetch(A+'/api/agents/'+id,{method:'DELETE'});agents=agents.filter(a=>a.id!==id);conns=conns.filter(c=>c.f!==id&&c.t!==id);fd('r','Deleted agent');rf();sw('agents');renderAgents();}
 
 function addPersona(id){const p=prompt('Purpose (recruiting, cofounder, dating, freelance):');if(!p)return;fetch(A+'/api/agents/'+id+'/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose:p})}).then(()=>{toast('Persona added');openDetail(id);});}
+
+async function loadFileTree(id){const el=document.getElementById('file-tree-'+id);el.innerHTML='<div class="lb"><div class="md">Loading file tree...</div></div>';
+try{const r=await fetch(A+'/api/agents/'+id+'/files');const d=await r.json();
+el.innerHTML=`<div class="lb"><div class="md">File Tree (on disk)</div><div class="ft">${renderTree(d.tree,'')}</div></div>`;
+}catch(e){el.innerHTML=`<div class="lb"><div class="md">No files on disk</div><div class="d">Agent data is in memory only</div></div>`;}}
+
+function renderTree(nodes,indent){return nodes.map(n=>{if(n.type==='directory'){const ch=n.children?renderTree(n.children,indent+'  '):'';return`<div>${indent}<span style="color:var(--gold)">📁 ${n.name}/</span></div>${ch}`;}
+return`<div style="cursor:pointer" onclick="viewFileById('${n.path}')">${indent}<span style="color:${n.tier==='structured'?'var(--teal)':n.tier==='evaluable'?'var(--gold)':n.tier==='human_only'?'var(--red)':'var(--dim)'}">📄 ${n.name}</span> <span class="d">${n.size?n.size+'b':''}</span></div>`;}).join('');}
+
+async function viewFile(id,path){const el=document.getElementById('file-content-'+id);el.innerHTML='<div class="lb"><div class="md">Loading '+path+'...</div></div>';
+try{const r=await fetch(A+'/api/agents/'+id+'/file?path='+encodeURIComponent(path));const d=await r.json();
+const isJson=path.endsWith('.json');const content=isJson?JSON.stringify(JSON.parse(d.content),null,2):d.content;
+el.innerHTML=`<div class="lb"><div class="md">${path}</div><pre style="white-space:pre-wrap;font-size:11px;line-height:1.6;color:var(--teal)">${escHtml(content)}</pre></div>`;
+}catch(e){el.innerHTML=`<div class="lb"><div class="md">Error</div><div class="d">${e.message}</div></div>`;}}
+
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 async function autoPop(){const ns=['Alice','Bob','Carol','Dave','Eve','Frank','Grace','Heidi'];
 const ps=['recruiting','recruiting','recruiting','cofounder','cofounder','recruiting','freelance','dating'];

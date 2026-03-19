@@ -33,6 +33,28 @@ import {
 import { ContactRequestSchema } from "../delegate/types.js";
 import { triageContactRequest } from "../delegate/contact-handler.js";
 import type { DelegateFilesystem } from "../delegate/types.js";
+import {
+  writeAgentFilesystem,
+  deleteAgentFilesystem,
+  listAgentFilesystems,
+  readAgentMetadata,
+  createDelegateTools,
+  scoreViaFileTools,
+} from "../filesystem/agent-fs.js";
+import {
+  createMatch,
+  acceptMatch,
+  declineMatch,
+  getAllMatches,
+  getMatch,
+  getMatchesForAgent,
+  sendMatchMessage,
+  scoreMatchViaFiles,
+  scoreMatchViaLLM,
+  clearAllMatches,
+  type MatchAgent,
+} from "../discovery/match-lifecycle.js";
+import { evaluateMatch, type DelegateEvent } from "../filesystem/llm-delegate.js";
 
 export interface LocalServerConfig {
   name: string;
@@ -57,6 +79,10 @@ export async function startLocalServer(
 
   const venue = createLocalVenue(config.name);
   let server: Server;
+
+  // File-based agent storage directory
+  const agentBaseDir = process.env.AGENTVERSE_HOME || path.join(process.cwd(), ".agentverse-dev");
+  fs.mkdirSync(path.join(agentBaseDir, "agents"), { recursive: true });
 
   /** Get API key from env (preferred) or request body (fallback). */
   function getApiKey(bodyKey?: string): string | null {
@@ -436,6 +462,16 @@ Return JSON only.`,
     const structured: Record<string, any> = { skills: skills || [] };
     if (experienceBand) structured.experienceBand = experienceBand;
 
+    // Write agent data as real files on disk
+    writeAgentFilesystem(agentBaseDir, id, {
+      name,
+      purpose,
+      did,
+      structured,
+      evaluable_text: evaluable_text || {},
+      human_only: human_only || {},
+    });
+
     const filesystem = {
       purpose,
       created_at: new Date().toISOString(),
@@ -482,21 +518,111 @@ Return JSON only.`,
     const { withdrawListing } = await import("../discovery/bucket-registry.js");
     withdrawListing(agent.bucketId, agent.listingId);
     agentRegistry.delete(req.params.id);
+    deleteAgentFilesystem(agentBaseDir, req.params.id);
     res.json({ success: true });
   });
 
-  // ─── Agent Filesystem View ─────────────────────────────
+  // ─── Agent Filesystem View (file-based) ────────────────
 
   app.get("/api/agents/:id/filesystem", (req, res) => {
     const agent = agentRegistry.get(req.params.id);
     if (!agent) return res.status(404).json({ error: "Agent not found" });
 
-    res.json({
-      structured: agent.structured,
-      evaluable_text: agent.evaluable_text || {},
-      human_only: agent.human_only || {},
-    });
+    // Try reading from disk first (file-based), fall back to in-memory
+    try {
+      const tools = createDelegateTools(agentBaseDir, req.params.id, ["structured", "evaluable", "human_only"]);
+      const allFiles = tools.list_files(".");
+
+      // Read structured files
+      const structured: Record<string, any> = {};
+      const structFiles = tools.list_files("structured");
+      for (const f of structFiles) {
+        if (f.type === "file" && f.name.endsWith(".json")) {
+          try {
+            structured[f.name.replace(".json", "")] = JSON.parse(tools.read_file(f.path));
+          } catch {}
+        }
+      }
+
+      // Read evaluable files
+      const evaluable_text: Record<string, string> = {};
+      try {
+        const evalFiles = tools.list_files("evaluable");
+        for (const f of evalFiles) {
+          if (f.type === "file") {
+            evaluable_text[f.name.replace(".txt", "")] = tools.read_file(f.path);
+          }
+        }
+      } catch {}
+
+      // Read human_only files
+      const human_only: Record<string, string> = {};
+      try {
+        const hoFiles = tools.list_files("human_only");
+        for (const f of hoFiles) {
+          if (f.type === "file") {
+            human_only[f.name.replace(".txt", "")] = tools.read_file(f.path);
+          }
+        }
+      } catch {}
+
+      res.json({ structured, evaluable_text, human_only, source: "filesystem", file_tree: allFiles });
+    } catch {
+      // Fallback to in-memory
+      res.json({
+        structured: agent.structured,
+        evaluable_text: agent.evaluable_text || {},
+        human_only: agent.human_only || {},
+        source: "memory",
+      });
+    }
   });
+
+  // ─── Agent File Tree ──────────────────────────────────
+
+  app.get("/api/agents/:id/files", (req, res) => {
+    try {
+      const tools = createDelegateTools(agentBaseDir, req.params.id, ["structured", "evaluable", "human_only"]);
+      const tree = buildFileTree(tools, ".");
+      res.json({ tree, agent_id: req.params.id });
+    } catch (err: any) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/agents/:id/file", (req, res) => {
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ error: "path query param required" });
+    try {
+      const tools = createDelegateTools(agentBaseDir, req.params.id, ["structured", "evaluable", "human_only"]);
+      const content = tools.read_file(filePath);
+      res.json({ path: filePath, content });
+    } catch (err: any) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/agents/:id/search", (req, res) => {
+    const query = req.query.q as string;
+    if (!query) return res.status(400).json({ error: "Query required (?q=...)" });
+    try {
+      const tools = createDelegateTools(agentBaseDir, req.params.id, ["structured", "evaluable"]);
+      const results = tools.search(query);
+      res.json({ results, query });
+    } catch (err: any) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  function buildFileTree(tools: ReturnType<typeof createDelegateTools>, dir: string): any[] {
+    const entries = tools.list_files(dir);
+    return entries.map(e => {
+      if (e.type === "directory") {
+        return { ...e, children: buildFileTree(tools, e.path) };
+      }
+      return e;
+    });
+  }
 
   // ─── LLM Scoring ───────────────────────────────────────
 
@@ -854,19 +980,368 @@ Rate compatibility. Respond with ONLY valid JSON:
       return res.status(400).json({ error: "Need at least 2 agents" });
     }
 
-    const { scoreCompatibility } = await import("../delegate/lifecycle.js");
-
     for (let i = 0; i < agentsToScore.length; i++) {
       for (let j = i + 1; j < agentsToScore.length; j++) {
         const a = agentsToScore[i], b = agentsToScore[j];
-        const fsA = { purpose: a.purpose, created_at: a.created_at, owner_did: a.did, structured: a.structured };
-        const fsB = { purpose: b.purpose, created_at: b.created_at, owner_did: b.did, structured: b.structured };
-        const result = scoreCompatibility(fsA, fsB);
-        results.push({ agent_a: a.name, agent_b: b.name, ...result });
+
+        // Try file-based scoring first, fall back to in-memory
+        try {
+          const result = scoreViaFileTools(agentBaseDir, a.id, b.id);
+          results.push({ agent_a: a.name, agent_b: b.name, ...result, method: "file-based" });
+        } catch {
+          // Fallback to in-memory scoring
+          const { scoreCompatibility } = await import("../delegate/lifecycle.js");
+          const fsA = { purpose: a.purpose, created_at: a.created_at, owner_did: a.did, structured: a.structured };
+          const fsB = { purpose: b.purpose, created_at: b.created_at, owner_did: b.did, structured: b.structured };
+          const result = scoreCompatibility(fsA, fsB);
+          results.push({ agent_a: a.name, agent_b: b.name, ...result, method: "in-memory" });
+        }
       }
     }
 
     res.json({ matrix: results });
+  });
+
+  // ─── Match Lifecycle API ─────────────────────────────────
+
+  // Run matching using file-based scoring, create match entries
+  app.post("/api/matches/run", async (_req, res) => {
+    const allAgents = Array.from(agentRegistry.values());
+    const newMatches: any[] = [];
+
+    // Group by bucket
+    const byBucket = new Map<string, typeof allAgents>();
+    for (const a of allAgents) {
+      const list = byBucket.get(a.bucketId) || [];
+      list.push(a);
+      byBucket.set(a.bucketId, list);
+    }
+
+    for (const [_bid, bucketAgents] of byBucket) {
+      for (let i = 0; i < bucketAgents.length; i++) {
+        for (let j = i + 1; j < bucketAgents.length; j++) {
+          const a = bucketAgents[i], b = bucketAgents[j];
+
+          // Build MatchAgent objects
+          const agentA: MatchAgent = {
+            id: a.id, name: a.name, did: a.did, purpose: a.purpose,
+            filesystem: {
+              structured: a.structured,
+              evaluable_text: a.evaluable_text || {},
+              human_only: a.human_only || {},
+            },
+          };
+          const agentB: MatchAgent = {
+            id: b.id, name: b.name, did: b.did, purpose: b.purpose,
+            filesystem: {
+              structured: b.structured,
+              evaluable_text: b.evaluable_text || {},
+              human_only: b.human_only || {},
+            },
+          };
+
+          // Score using file-based tools if available, else in-memory
+          let scoring;
+          try {
+            scoring = scoreMatchViaFiles(agentBaseDir, a.id, b.id);
+          } catch {
+            const { scoreCompatibility } = await import("../delegate/lifecycle.js");
+            const fsA = { purpose: a.purpose, created_at: a.created_at, owner_did: a.did, structured: a.structured };
+            const fsB = { purpose: b.purpose, created_at: b.created_at, owner_did: b.did, structured: b.structured };
+            const resultAB = scoreCompatibility(fsA, fsB);
+            const resultBA = scoreCompatibility(fsB, fsA);
+            scoring = { a_scores_b: resultAB, b_scores_a: resultBA, method: "deterministic" as const };
+          }
+
+          const match = createMatch(agentA, agentB, scoring);
+          newMatches.push({
+            id: match.id,
+            agent_a: match.agent_a.name,
+            agent_b: match.agent_b.name,
+            signal_ab: match.scoring.a_scores_b.signal,
+            signal_ba: match.scoring.b_scores_a.signal,
+            matched_on: match.scoring.a_scores_b.matched_on,
+            method: match.scoring.method,
+          });
+        }
+      }
+    }
+
+    res.json({ matches_created: newMatches.length, matches: newMatches });
+  });
+
+  // List all matches
+  app.get("/api/matches", (_req, res) => {
+    res.json({ matches: getAllMatches() });
+  });
+
+  // Get specific match
+  app.get("/api/matches/:id", (req, res) => {
+    const match = getMatch(req.params.id);
+    if (!match) return res.status(404).json({ error: "Match not found" });
+    res.json({ match });
+  });
+
+  // Accept match (from side A or B)
+  app.post("/api/matches/:id/accept", (req, res) => {
+    const { agent_id } = req.body;
+    const match = getMatch(req.params.id);
+    if (!match) return res.status(404).json({ error: "Match not found" });
+
+    const side = match.agent_a.id === agent_id ? "a" : match.agent_b.id === agent_id ? "b" : null;
+    if (!side) return res.status(400).json({ error: "Agent not in this match" });
+
+    const result = acceptMatch(req.params.id, side);
+    if (!result) return res.status(400).json({ error: "Cannot accept (already declined/expired)" });
+
+    if (result.mutual) {
+      acceptedMatchCount++;
+      auditEntries.push({
+        seq: auditEntries.length,
+        timestamp: new Date().toISOString(),
+        event: "mutual_match",
+        agent_a: match.agent_a.name,
+        agent_b: match.agent_b.name,
+        match_id: req.params.id,
+        status: "mutual",
+      });
+    }
+
+    res.json({
+      match: result.match,
+      mutual: result.mutual,
+      message: result.mutual
+        ? `Mutual match! ${match.agent_a.name} and ${match.agent_b.name} have both accepted. human_only files revealed.`
+        : `Accepted. Waiting for ${side === "a" ? match.agent_b.name : match.agent_a.name} to accept.`,
+    });
+  });
+
+  // Decline match
+  app.post("/api/matches/:id/decline", (req, res) => {
+    const { agent_id } = req.body;
+    const match = getMatch(req.params.id);
+    if (!match) return res.status(404).json({ error: "Match not found" });
+
+    const side = match.agent_a.id === agent_id ? "a" : match.agent_b.id === agent_id ? "b" : null;
+    if (!side) return res.status(400).json({ error: "Agent not in this match" });
+
+    const result = declineMatch(req.params.id, side);
+    if (!result) return res.status(400).json({ error: "Cannot decline" });
+
+    res.json({ match: result });
+  });
+
+  // LLM score a match
+  app.post("/api/matches/:id/llm-score", async (req, res) => {
+    const apiKey = getApiKey(req.body.api_key);
+    if (!apiKey) return res.status(400).json({ error: "API key required" });
+
+    try {
+      const scoring = await scoreMatchViaLLM(req.params.id, apiKey);
+      if (!scoring) return res.status(404).json({ error: "Match not found" });
+      res.json({ scoring, match: getMatch(req.params.id) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Run LLM delegate agents to evaluate a match (both agents run in parallel)
+  app.post("/api/matches/:id/evaluate", async (req, res) => {
+    const apiKey = getApiKey(req.body.api_key);
+    if (!apiKey) return res.status(400).json({ error: "API key required. Set ANTHROPIC_API_KEY in .env" });
+
+    const match = getMatch(req.params.id);
+    if (!match) return res.status(404).json({ error: "Match not found" });
+
+    try {
+      const result = await evaluateMatch(
+        apiKey,
+        agentBaseDir,
+        req.params.id,
+        { id: match.agent_a.id, name: match.agent_a.name, purpose: match.agent_a.purpose },
+        { id: match.agent_b.id, name: match.agent_b.name, purpose: match.agent_b.purpose },
+        req.body.model
+      );
+
+      // Apply decisions to the match
+      if (result.agent_a_result.decision.decision === "accept") {
+        acceptMatch(req.params.id, "a");
+      } else {
+        declineMatch(req.params.id, "a");
+      }
+
+      if (result.agent_b_result.decision.decision === "accept") {
+        acceptMatch(req.params.id, "b");
+      } else {
+        declineMatch(req.params.id, "b");
+      }
+
+      // Update scoring with LLM results
+      const updatedMatch = getMatch(req.params.id);
+      if (updatedMatch) {
+        updatedMatch.scoring = {
+          a_scores_b: {
+            signal: result.agent_a_result.decision.confidence >= 70 ? "strong" : result.agent_a_result.decision.confidence >= 40 ? "good" : "possible",
+            matched_on: result.agent_a_result.decision.matched_on,
+            gaps: result.agent_a_result.decision.concerns,
+            summary: result.agent_a_result.decision.reasoning,
+            recommend_escalate: result.agent_a_result.decision.decision === "accept",
+            reasoning: result.agent_a_result.decision.recommend_to_human,
+          },
+          b_scores_a: {
+            signal: result.agent_b_result.decision.confidence >= 70 ? "strong" : result.agent_b_result.decision.confidence >= 40 ? "good" : "possible",
+            matched_on: result.agent_b_result.decision.matched_on,
+            gaps: result.agent_b_result.decision.concerns,
+            summary: result.agent_b_result.decision.reasoning,
+            recommend_escalate: result.agent_b_result.decision.decision === "accept",
+            reasoning: result.agent_b_result.decision.recommend_to_human,
+          },
+          method: "llm",
+          files_read: [
+            ...result.agent_a_result.decision.files_read,
+            ...result.agent_b_result.decision.files_read,
+          ],
+        };
+      }
+
+      if (result.mutual_accept) {
+        acceptedMatchCount++;
+        auditEntries.push({
+          seq: auditEntries.length,
+          timestamp: new Date().toISOString(),
+          event: "llm_mutual_match",
+          agent_a: match.agent_a.name,
+          agent_b: match.agent_b.name,
+          match_id: req.params.id,
+          a_confidence: result.agent_a_result.decision.confidence,
+          b_confidence: result.agent_b_result.decision.confidence,
+        });
+      }
+
+      // Strip llm_messages from response (they contain raw LLM content with control chars)
+      const cleanResult = {
+        ...result,
+        agent_a_result: { ...result.agent_a_result, llm_messages: `[${result.agent_a_result.llm_messages.length} messages]` },
+        agent_b_result: { ...result.agent_b_result, llm_messages: `[${result.agent_b_result.llm_messages.length} messages]` },
+      };
+      res.json({
+        result: cleanResult,
+        match: getMatch(req.params.id),
+        summary: {
+          agent_a: {
+            name: result.agent_a_result.agent_name,
+            decision: result.agent_a_result.decision.decision,
+            confidence: result.agent_a_result.decision.confidence,
+            reasoning: result.agent_a_result.decision.recommend_to_human,
+            tool_calls: result.agent_a_result.decision.tool_calls,
+            files_read: result.agent_a_result.decision.files_read.length,
+            tokens: result.agent_a_result.total_tokens,
+            duration_ms: result.agent_a_result.duration_ms,
+          },
+          agent_b: {
+            name: result.agent_b_result.agent_name,
+            decision: result.agent_b_result.decision.decision,
+            confidence: result.agent_b_result.decision.confidence,
+            reasoning: result.agent_b_result.decision.recommend_to_human,
+            tool_calls: result.agent_b_result.decision.tool_calls,
+            files_read: result.agent_b_result.decision.files_read.length,
+            tokens: result.agent_b_result.total_tokens,
+            duration_ms: result.agent_b_result.duration_ms,
+          },
+          mutual_accept: result.mutual_accept,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SSE streaming evaluation — streams each tool call as it happens
+  app.get("/api/matches/:id/evaluate-stream", async (req, res) => {
+    const apiKey = getApiKey();
+    if (!apiKey) { res.status(400).json({ error: "API key required" }); return; }
+
+    const match = getMatch(req.params.id);
+    if (!match) { res.status(404).json({ error: "Match not found" }); return; }
+
+    // Set up SSE
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const sendEvent = (event: DelegateEvent) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    try {
+      const result = await evaluateMatch(
+        apiKey,
+        agentBaseDir,
+        req.params.id,
+        { id: match.agent_a.id, name: match.agent_a.name, purpose: match.agent_a.purpose },
+        { id: match.agent_b.id, name: match.agent_b.name, purpose: match.agent_b.purpose },
+        (req.query.model as string) || undefined,
+        sendEvent
+      );
+
+      // Apply decisions
+      if (result.agent_a_result.decision.decision === "accept") acceptMatch(req.params.id, "a");
+      else declineMatch(req.params.id, "a");
+      if (result.agent_b_result.decision.decision === "accept") acceptMatch(req.params.id, "b");
+      else declineMatch(req.params.id, "b");
+
+      // Update scoring
+      const updatedMatch = getMatch(req.params.id);
+      if (updatedMatch) {
+        updatedMatch.scoring = {
+          a_scores_b: {
+            signal: result.agent_a_result.decision.confidence >= 70 ? "strong" : result.agent_a_result.decision.confidence >= 40 ? "good" : "possible",
+            matched_on: result.agent_a_result.decision.matched_on,
+            gaps: result.agent_a_result.decision.concerns,
+            summary: result.agent_a_result.decision.reasoning,
+            recommend_escalate: result.agent_a_result.decision.decision === "accept",
+            reasoning: result.agent_a_result.decision.recommend_to_human,
+          },
+          b_scores_a: {
+            signal: result.agent_b_result.decision.confidence >= 70 ? "strong" : result.agent_b_result.decision.confidence >= 40 ? "good" : "possible",
+            matched_on: result.agent_b_result.decision.matched_on,
+            gaps: result.agent_b_result.decision.concerns,
+            summary: result.agent_b_result.decision.reasoning,
+            recommend_escalate: result.agent_b_result.decision.decision === "accept",
+            reasoning: result.agent_b_result.decision.recommend_to_human,
+          },
+          method: "llm",
+          files_read: [...result.agent_a_result.decision.files_read, ...result.agent_b_result.decision.files_read],
+        };
+      }
+
+      if (result.mutual_accept) acceptedMatchCount++;
+
+      // Send final result
+      res.write(`data: ${JSON.stringify({ type: "complete", mutual_accept: result.mutual_accept, match: getMatch(req.params.id), summary: { agent_a: { name: result.agent_a_result.agent_name, decision: result.agent_a_result.decision.decision, confidence: result.agent_a_result.decision.confidence, reasoning: result.agent_a_result.decision.recommend_to_human, tool_calls: result.agent_a_result.decision.tool_calls, files_read: result.agent_a_result.decision.files_read.length, tokens: result.agent_a_result.total_tokens, duration_ms: result.agent_a_result.duration_ms }, agent_b: { name: result.agent_b_result.agent_name, decision: result.agent_b_result.decision.decision, confidence: result.agent_b_result.decision.confidence, reasoning: result.agent_b_result.decision.recommend_to_human, tool_calls: result.agent_b_result.decision.tool_calls, files_read: result.agent_b_result.decision.files_read.length, tokens: result.agent_b_result.total_tokens, duration_ms: result.agent_b_result.duration_ms }, mutual_accept: result.mutual_accept } })}\n\n`);
+    } catch (err: any) {
+      res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
+    }
+
+    res.end();
+  });
+
+  // Send message in a mutual match
+  app.post("/api/matches/:id/message", (req, res) => {
+    const { agent_id, content } = req.body;
+    const match = getMatch(req.params.id);
+    if (!match) return res.status(404).json({ error: "Match not found" });
+
+    const side = match.agent_a.id === agent_id ? "a" : match.agent_b.id === agent_id ? "b" : null;
+    if (!side) return res.status(400).json({ error: "Agent not in this match" });
+
+    const msg = sendMatchMessage(req.params.id, side, content);
+    if (!msg) return res.status(400).json({ error: "Cannot message (match must be mutual/connected)" });
+
+    res.json({ message: msg, match: getMatch(req.params.id) });
   });
 
   // ─── Dashboard ───────────────────────────────────────────
@@ -898,11 +1373,14 @@ Rate compatibility. Respond with ONLY valid JSON:
   // ─── Health ──────────────────────────────────────────────
 
   app.get("/api/stats", (_req, res) => {
+    const allM = getAllMatches();
     res.json({
       agents: agentRegistry.size,
       buckets: listBuckets().length,
-      matches: acceptedMatchCount,
-      proposals: getPendingProposals().length,
+      matches: allM.filter(m => m.status === "mutual" || m.status === "revealed" || m.status === "connected").length,
+      proposals: allM.filter(m => m.status === "proposed" || m.status === "accepted").length,
+      mutual: allM.filter(m => m.status === "mutual" || m.status === "connected").length,
+      total_matches: allM.length,
       communications: matchComms.length,
       audit_entries: auditEntries.length,
       has_api_key: !!process.env.ANTHROPIC_API_KEY,
