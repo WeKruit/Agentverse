@@ -9,6 +9,11 @@ import {
   readAgentMetadata,
   createDelegateTools,
   scoreViaFileTools,
+  createDelegate,
+  listDelegates,
+  readDelegateMetadata,
+  deleteDelegate,
+  scoreDelegatesViaFileTools,
 } from "../src/filesystem/agent-fs.js";
 
 describe("File-Based Agent Filesystem", () => {
@@ -266,4 +271,168 @@ describe("File-Based Agent Filesystem", () => {
       expect(result.gaps.some((g) => g.includes("kubernetes"))).toBe(true);
     });
   });
+
+  // ─── Delegate Management ────────────────────────
+
+  describe("Delegates (purpose-scoped projections)", () => {
+    beforeEach(() => {
+      // Create a main agent with lots of data
+      writeAgentFilesystem(tmpDir, "alice", {
+        name: "Alice",
+        structured: {
+          skills: ["rust", "typescript", "cryptography", "distributed-systems"],
+          values: ["autonomy", "impact", "privacy"],
+          experienceBand: "5-10yr",
+          interests: ["hiking", "photography"],
+          domains: ["fintech", "privacy-tech"],
+          looking_for: ["biz-cofounder"],
+        },
+        evaluable_text: {
+          about: "Built payment infrastructure at Stripe",
+          vision: "Privacy layer for AI agents",
+          projects: "Led team of 5 on real-time payments",
+        },
+        human_only: {
+          salary: "180-220K",
+          notes: "Looking for remote only",
+        },
+      });
+    });
+
+    it("creates a delegate with purpose-specific subset of data", () => {
+      const delegatePath = createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      expect(fs.existsSync(delegatePath)).toBe(true);
+      expect(fs.existsSync(path.join(delegatePath, "metadata.json"))).toBe(true);
+      expect(fs.existsSync(path.join(delegatePath, "README.md"))).toBe(true);
+
+      // Recruiting delegate should have skills but NOT interests or looking_for
+      expect(fs.existsSync(path.join(delegatePath, "structured/skills.json"))).toBe(true);
+      expect(fs.existsSync(path.join(delegatePath, "structured/experienceBand.json"))).toBe(true);
+      // Should NOT have human_only directory at all
+      expect(fs.existsSync(path.join(delegatePath, "human_only"))).toBe(false);
+    });
+
+    it("delegate metadata references parent agent", () => {
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      const meta = readDelegateMetadata(tmpDir, "alice", "recruiting");
+      expect(meta?.parent_agent_id).toBe("alice");
+      expect(meta?.parent_agent_name).toBe("Alice");
+      expect(meta?.purpose).toBe("recruiting");
+    });
+
+    it("different purposes get different subsets", () => {
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      createDelegate(tmpDir, "alice", { purpose: "cofounder" });
+
+      // Recruiting should have skills, experienceBand
+      const recruitingSkills = JSON.parse(
+        fs.readFileSync(path.join(tmpDir, "agents/alice/delegates/recruiting/structured/skills.json"), "utf-8")
+      );
+      expect(recruitingSkills).toContain("rust");
+
+      // Cofounder should have skills, values, looking_for
+      expect(fs.existsSync(path.join(tmpDir, "agents/alice/delegates/cofounder/structured/looking_for.json"))).toBe(true);
+    });
+
+    it("listDelegates returns all delegate purposes", () => {
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      createDelegate(tmpDir, "alice", { purpose: "cofounder" });
+      const delegates = listDelegates(tmpDir, "alice");
+      expect(delegates.sort()).toEqual(["cofounder", "recruiting"]);
+    });
+
+    it("deleteDelegate removes the delegate directory", () => {
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      expect(fs.existsSync(path.join(tmpDir, "agents/alice/delegates/recruiting"))).toBe(true);
+      deleteDelegate(tmpDir, "alice", "recruiting");
+      expect(fs.existsSync(path.join(tmpDir, "agents/alice/delegates/recruiting"))).toBe(false);
+    });
+
+    it("delegate never includes human_only data", () => {
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      const delegateDir = path.join(tmpDir, "agents/alice/delegates/recruiting");
+      // Walk the entire delegate directory — no human_only anywhere
+      const allFiles = getAllFiles(delegateDir);
+      expect(allFiles.some(f => f.includes("human_only"))).toBe(false);
+      expect(allFiles.some(f => f.includes("salary"))).toBe(false);
+    });
+
+    it("supports custom field selection", () => {
+      createDelegate(tmpDir, "alice", {
+        purpose: "custom",
+        include_structured: ["skills", "interests"],
+        include_evaluable: ["about"],
+      });
+
+      const delegateDir = path.join(tmpDir, "agents/alice/delegates/custom");
+      expect(fs.existsSync(path.join(delegateDir, "structured/skills.json"))).toBe(true);
+      expect(fs.existsSync(path.join(delegateDir, "structured/interests.json"))).toBe(true);
+      // Should NOT have experienceBand (not in include list)
+      expect(fs.existsSync(path.join(delegateDir, "structured/experienceBand.json"))).toBe(false);
+    });
+
+    it("supports extra fields not from parent", () => {
+      createDelegate(tmpDir, "alice", {
+        purpose: "custom",
+        include_structured: ["skills"],
+        extra_structured: { availability: "full-time" },
+        extra_evaluable: { pitch: "Building the future of privacy" },
+      });
+
+      const delegateDir = path.join(tmpDir, "agents/alice/delegates/custom");
+      const avail = JSON.parse(fs.readFileSync(path.join(delegateDir, "structured/availability.json"), "utf-8"));
+      expect(avail).toBe("full-time");
+      const pitch = fs.readFileSync(path.join(delegateDir, "evaluable/pitch.txt"), "utf-8");
+      expect(pitch).toBe("Building the future of privacy");
+    });
+  });
+
+  // ─── Delegate Scoring ───────────────────────────
+
+  describe("scoreDelegatesViaFileTools", () => {
+    beforeEach(() => {
+      writeAgentFilesystem(tmpDir, "alice", {
+        name: "Alice",
+        structured: { skills: ["rust", "typescript"], values: ["autonomy"] },
+        evaluable_text: { about: "Stripe engineer" },
+        human_only: { salary: "200K" },
+      });
+      writeAgentFilesystem(tmpDir, "bob", {
+        name: "Bob",
+        structured: { skills: ["rust", "go"], values: ["impact"] },
+        evaluable_text: { about: "Cloud infrastructure" },
+        human_only: { salary: "180K" },
+      });
+
+      createDelegate(tmpDir, "alice", { purpose: "recruiting" });
+      createDelegate(tmpDir, "bob", { purpose: "recruiting" });
+    });
+
+    it("scores compatibility between two delegates", () => {
+      const result = scoreDelegatesViaFileTools(tmpDir, "alice", "recruiting", "bob", "recruiting");
+      expect(["strong", "good", "possible", "weak"]).toContain(result.signal);
+      expect(result.matched_on).toContain("rust");
+      expect(result.files_read.length).toBeGreaterThan(0);
+    });
+
+    it("does not read human_only files during delegate scoring", () => {
+      const result = scoreDelegatesViaFileTools(tmpDir, "alice", "recruiting", "bob", "recruiting");
+      expect(result.files_read.some(f => f.includes("human_only"))).toBe(false);
+      expect(result.files_read.some(f => f.includes("salary"))).toBe(false);
+    });
+  });
 });
+
+// Helper to recursively list all files
+function getAllFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (fs.statSync(full).isDirectory()) {
+      files.push(...getAllFiles(full));
+    } else {
+      files.push(full);
+    }
+  }
+  return files;
+}

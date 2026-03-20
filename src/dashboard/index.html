@@ -318,12 +318,14 @@ const kx=W/2,ky=H/2,t=fr*.008;
 for(let i=0;i<3;i++){cx.strokeStyle=`rgba(93,202,165,${.08-i*.02})`;cx.beginPath();cx.arc(kx,ky,25+i*10,t+i*.5,t+i*.5+Math.PI*1.4);cx.stroke();}
 cx.strokeStyle='rgba(93,202,165,.25)';cx.lineWidth=1.5;cx.beginPath();for(let i=0;i<6;i++){const a=t*.3+Math.PI/3*i;const x=kx+14*Math.cos(a),y=ky+14*Math.sin(a);i?cx.lineTo(x,y):cx.moveTo(x,y);}cx.closePath();cx.stroke();
 cx.fillStyle='rgba(93,202,165,.4)';cx.font='9px "JetBrains Mono"';cx.textAlign='center';cx.fillText('KERNEL',kx,ky+3);
-for(const c of conns){const a=agents.find(x=>x.id===c.f),b=agents.find(x=>x.id===c.t);if(!a?._x||!b?._x)continue;const col=COL[a.purpose]||'#ED93B1';const mx=(a._x+b._x)/2,my=(a._y+b._y)/2-20;cx.strokeStyle=col+'35';cx.lineWidth=1;cx.beginPath();cx.moveTo(a._x,a._y);cx.quadraticCurveTo(mx,my,b._x,b._y);cx.stroke();const pt=(fr*.015+c.o)%1;const dx=(1-pt)*(1-pt)*a._x+2*(1-pt)*pt*mx+pt*pt*b._x,dy=(1-pt)*(1-pt)*a._y+2*(1-pt)*pt*my+pt*pt*b._y;cx.fillStyle=col;cx.beginPath();cx.arc(dx,dy,2,0,Math.PI*2);cx.fill();}
+for(const c of conns){const a=agents.find(x=>x.id===c.f||x.name===c.f),b=agents.find(x=>x.id===c.t||x.name===c.t);if(!a?._x||!b?._x)continue;const col=COL[a.purpose]||'#ED93B1';const mx=(a._x+b._x)/2,my=(a._y+b._y)/2-20;cx.strokeStyle=col+'35';cx.lineWidth=1;cx.beginPath();cx.moveTo(a._x,a._y);cx.quadraticCurveTo(mx,my,b._x,b._y);cx.stroke();const pt=(fr*.015+c.o)%1;const dx=(1-pt)*(1-pt)*a._x+2*(1-pt)*pt*mx+pt*pt*b._x,dy=(1-pt)*(1-pt)*a._y+2*(1-pt)*pt*my+pt*pt*b._y;cx.fillStyle=col;cx.beginPath();cx.arc(dx,dy,2,0,Math.PI*2);cx.fill();}
 const n=agents.length||1;agents.forEach((ag,i)=>{const ang=(Math.PI*2/n)*i;const orb=Math.min(kx,ky)*.65;const x=kx+orb*Math.cos(t+ang)+Math.sin(t*1.2+i)*10,y=ky+orb*Math.sin(t+ang)*.6+Math.cos(t*1.5+i)*8;ag._x=x;ag._y=y;const col=COL[ag.purpose]||'#ED93B1';const g=cx.createRadialGradient(x,y,0,x,y,20);g.addColorStop(0,col+'25');g.addColorStop(1,col+'00');cx.fillStyle=g;cx.fillRect(x-20,y-20,40,40);cx.fillStyle=col;cx.beginPath();cx.arc(x,y,6,0,Math.PI*2);cx.fill();cx.fillStyle='#060610';cx.beginPath();cx.arc(x,y,2.5,0,Math.PI*2);cx.fill();cx.fillStyle=col+'bb';cx.font='9px "DM Sans"';cx.textAlign='center';cx.fillText(ag.name,x,y+16);});
 fr++;requestAnimationFrame(draw);}draw();
 
 // ─── Data ─────────────────────────────────────────
-async function rf(){try{const[s,a]=await Promise.all([fetch(A+'/api/stats'),fetch(A+'/api/agents')]);const st=await s.json(),ad=await a.json();document.getElementById('s-ag').textContent=st.agents;document.getElementById('s-bk').textContent=st.buckets;document.getElementById('s-mt').textContent=st.matches;document.getElementById('s-pr').textContent=st.proposals;mc=st.matches;agents=ad.agents.map(x=>({...x,_x:0,_y:0}));}catch{}}
+async function rf(){try{const[s,a,m]=await Promise.all([fetch(A+'/api/stats'),fetch(A+'/api/agents'),fetch(A+'/api/matches')]);const st=await s.json(),ad=await a.json(),md=await m.json();document.getElementById('s-ag').textContent=st.agents;document.getElementById('s-bk').textContent=st.buckets;document.getElementById('s-mt').textContent=st.matches;document.getElementById('s-pr').textContent=st.proposals;mc=st.matches;agents=ad.agents.map(x=>({...x,_x:0,_y:0}));
+// Rebuild canvas connections from matches
+conns=[];for(const mt of md.matches||[]){if(mt.status!=='declined'&&mt.status!=='expired'){conns.push({f:mt.agent_a?.id||mt.agent_a?.name,t:mt.agent_b?.id||mt.agent_b?.name,s:mt.scoring?.a_scores_b?.signal||'possible',o:Math.random()});}}}catch{}}
 
 // ─── Agents ───────────────────────────────────────
 function renderAgents(){const el=document.getElementById('ag-list');if(!agents.length){el.innerHTML='<div class="em"><h3>No Agents</h3><p>Add agents to get started</p><button class="bt bt-p" onclick="openAdd()">+ Add Agent</button></div>';return;}
@@ -341,6 +343,20 @@ document.getElementById('v-agent-detail').innerHTML=`
 <div class="cd"><h3>Reputation <span class="tg ${rp.tier==='new'?'tg-b':rp.tier==='gold'||rp.tier==='platinum'?'tg-g':'tg-t'}">${rp.tier}</span></h3>
 <div style="font-size:32px;font-weight:700;color:${col};margin:8px 0">${rp.overall}/100</div>
 <div class="ft">${Object.entries(rp.components||{}).map(([k,v])=>`<div><span class="k">${k}:</span> <span class="v">${typeof v==='number'?(v*100).toFixed(0)+'%':v}</span><div class="bar-track"><div class="bar-fill" style="width:${(typeof v==='number'?v*100:50)}%;background:${col}"></div></div></div>`).join('')}</div></div>
+<div class="cd" style="grid-column:span 2"><h3>Profile</h3>
+${fs.evaluable_text?.about?`<div class="lb" style="margin-bottom:10px"><div class="md">About</div><div style="font-size:12px">${fs.evaluable_text.about}</div></div>`:''}
+<div class="g2">
+<div>
+<div style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--teal)">Skills</div>
+${(Array.isArray(fs.structured?.skills)?fs.structured.skills:[]).map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-size:11px;min-width:100px">${s}</span><div class="bar-track" style="flex:1"><div class="bar-fill" style="width:${60+Math.random()*35}%;background:${col}"></div></div></div>`).join('')||'<div class="d" style="font-size:11px">none</div>'}
+</div>
+<div>
+${fs.structured?.values?`<div style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--purple)">Values</div>${(Array.isArray(fs.structured.values)?fs.structured.values:[]).map(v=>`<span class="tg tg-p">${v}</span>`).join(' ')}`:''}
+${fs.structured?.experienceBand?`<div style="font-size:11px;font-weight:600;margin:8px 0 4px;color:var(--gold)">Experience</div><span class="tg tg-g">${fs.structured.experienceBand}</span>`:''}
+${fs.structured?.domains?`<div style="font-size:11px;font-weight:600;margin:8px 0 4px;color:var(--blue)">Domains</div>${(Array.isArray(fs.structured.domains)?fs.structured.domains:[]).map(d=>`<span class="tg tg-b">${d}</span>`).join(' ')}`:''}
+</div>
+</div>
+</div>
 <div class="cd" style="grid-column:span 2"><h3>Agent Filesystem <span class="tg tg-t">${fs.source||'memory'}</span> <button class="bt bt-s" onclick="loadFileTree('${id}')">View File Tree</button></h3>
 <div class="g3">
 <div class="tier-box"><h4><span class="tg tg-t">structured/</span> <span style="font-size:10px;color:var(--dim)">JSON files · LLM-safe</span></h4>
@@ -353,8 +369,9 @@ document.getElementById('v-agent-detail').innerHTML=`
 <div id="file-tree-${id}" style="margin-top:12px"></div>
 <div id="file-content-${id}" style="margin-top:12px"></div>
 </div>
-<div class="cd"><h3>Personas <button class="bt bt-s" onclick="addPersona('${id}')">+ Add</button></h3>
-<div>${(ag.personas||[]).map(p=>`<span class="tg tg-t">${p}</span>`).join(' ')||'<span class="d">none</span>'}</div></div>
+<div class="cd"><h3>Delegates <button class="bt bt-p bt-s" onclick="addDelegate('${id}')">+ Create Delegate</button></h3>
+<p style="font-size:11px;color:var(--dim);margin-bottom:8px">Delegates are purpose-scoped projections of this agent. Each delegate gets a subset of the main agent's data and is submitted to a matching bucket.</p>
+<div>${(ag.personas||[]).map(p=>`<div style="display:inline-flex;align-items:center;gap:4px;margin:2px"><span class="tg tg-t">${p}</span><button class="bt bt-s bt-d" style="padding:1px 4px;font-size:9px" onclick="delDelegate('${id}','${p}')">x</button></div>`).join(' ')||'<span class="d">No delegates yet. Create one to start matching.</span>'}</div></div>
 <div class="cd"><h3>LLM Evaluation</h3><div id="llm-${id}"><p class="d" style="font-size:12px">Click "LLM Score" to run AI compatibility evaluation</p></div></div>
 </div>`;sw('agent-detail');}
 
@@ -562,8 +579,8 @@ el.innerHTML=`<div class="lb"><div class="md">Claude Evaluation Complete</div><d
 fd('a','LLM re-scored match '+matchId.slice(0,12));toast('LLM scoring complete');loadProps();}catch(e){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Wallet ───────────────────────────────────────
-async function walletInit(){const r=await fetch(A+'/api/wallet/init',{method:'POST'});const d=await r.json();walletKeys=d.exported;
-document.getElementById('wallet-keys').innerHTML=`<div class="ft"><div><span class="k">Public Key:</span> <span class="v">${d.exported.publicKeyMultibase.slice(0,40)}...</span></div><div><span class="k">DID:</span> <span class="v">${d.didDocument.id}</span></div><div><span class="k">Algorithm:</span> <span class="v">BBS-BLS12-381-SHA-256</span></div></div>`;fd('a','Generated BLS12-381 key pair');toast('Keys generated');}
+async function walletInit(){try{const r=await sf(A+'/api/wallet/init',{method:'POST'});const d=await r.json();walletKeys=d.exported;
+document.getElementById('wallet-keys').innerHTML=`<div class="ft"><div><span class="k">Public Key:</span> <span class="v">${d.exported.publicKeyMultibase.slice(0,40)}...</span></div><div><span class="k">DID:</span> <span class="v">${d.didDocument.id}</span></div><div><span class="k">Algorithm:</span> <span class="v">BBS-BLS12-381-SHA-256</span></div></div>`;fd('a','Generated BLS12-381 key pair');toast('Keys generated');}catch(e){toast('Key gen failed: '+e.message);document.getElementById('wallet-keys').innerHTML=`<div style="color:var(--red);font-size:12px">${e.message}</div>`;}}
 
 async function walletIssue(){if(!walletKeys){toast('Generate keys first');return;}
 let claims;try{claims=JSON.parse(document.getElementById('vc-claims').value);}catch{toast('Invalid JSON');return;}
@@ -618,8 +635,8 @@ ${p.values?.length?`<h4 style="color:var(--purple);margin:8px 0">Values</h4>${p.
 fd('a',`Created agent ${d.agent.name} from extraction (${d.method})`);toast('Agent created: '+d.agent.name);await rf();}
 
 // ─── Buckets ──────────────────────────────────────
-async function loadBuckets(){const r=await fetch(A+'/api/buckets');const{buckets}=await r.json();
-document.getElementById('bk-list').innerHTML=buckets.map(b=>`<div class="cd"><h3>${b.name} <span class="tg tg-t">${b.category}</span></h3><div class="ft"><div><span class="k">ID:</span> <span class="v">${b.id}</span></div><div><span class="k">Fields:</span> <span class="v">${b.schema_fields.join(', ')}</span></div><div><span class="k">Agents:</span> <span class="v">${b.agent_count}</span></div><div><span class="k">Status:</span> <span class="v">${b.status}</span></div></div></div>`).join('');}
+async function loadBuckets(){try{const r=await fetch(A+'/api/buckets');const{buckets}=await r.json();
+document.getElementById('bk-list').innerHTML=buckets.map(b=>`<div class="cd"><h3>${b.name} <span class="tg tg-t">${b.category}</span></h3><div class="ft"><div><span class="k">ID:</span> <span class="v">${b.id}</span></div><div><span class="k">Fields:</span> <span class="v">${b.schema_fields.join(', ')}</span></div><div><span class="k">Agents:</span> <span class="v">${b.agent_count}</span></div><div><span class="k">Status:</span> <span class="v">${b.status}</span></div></div></div>`).join('');}catch(e){document.getElementById('bk-list').innerHTML=`<div class="d">Failed to load buckets: ${e.message}</div>`;}}
 
 // ─── Crypto ───────────────────────────────────────
 async function cryptoDemo(){const el=document.getElementById('crypto-result');el.innerHTML='<div class="lb"><div class="md">Running...</div></div>';
@@ -736,10 +753,10 @@ fd('a','LLM re-scored communication '+id.slice(0,12));toast('LLM scoring complet
 openCommDetail(id);}catch(e){el.innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div style="color:var(--red)">${e.message}</div></div>`;}}
 
 // ─── Audit ────────────────────────────────────────
-async function loadAudit(){const r=await fetch(A+'/api/audit');const{entries}=await r.json();
+async function loadAudit(){try{const r=await fetch(A+'/api/audit');const{entries}=await r.json();
 const el=document.getElementById('audit-list');
 if(!entries.length){el.innerHTML='<p class="d" style="font-size:12px">No audit entries</p>';return;}
-el.innerHTML=entries.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px"><span class="tg ${e.status==='shared'?'tg-t':e.status==='denied'?'tg-r':'tg-g'}">${e.status}</span> <span style="color:var(--dim)">${e.timestamp}</span> <span>${e.agent_domain||'N/A'}</span>${e.attributes_disclosed?.length?` — ${e.attributes_disclosed.join(', ')}`:''}</div>`).join('');}
+el.innerHTML=entries.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px"><span class="tg ${e.status==='shared'||e.event==='mutual_match'||e.event==='llm_mutual_match'?'tg-t':e.status==='denied'||e.event==='match_declined'?'tg-r':'tg-g'}">${e.event||e.status}</span> <span style="color:var(--dim)">${e.timestamp}</span> <span>${e.agent_a?e.agent_a+' ↔ '+e.agent_b:e.agent_domain||''}</span></div>`).join('');}catch(e){document.getElementById('audit-list').innerHTML=`<div class="d">Failed to load: ${e.message}</div>`;}}
 
 // ─── GDPR ─────────────────────────────────────────
 async function gdprExport(){const r=await fetch(A+'/api/gdpr/export');const d=await r.json();
@@ -750,15 +767,42 @@ async function gdprErase(){if(!confirm('This will delete ALL data. Are you sure?
 document.getElementById('gdpr-erase').innerHTML=`<div class="lb" style="border-color:rgba(240,149,149,.2)"><div class="md" style="color:var(--red)">Data Erased</div><div class="ft"><div><span class="k">Agents deleted:</span> <span class="v">${d.agents_deleted}</span></div></div></div>`;fd('r','All data erased (GDPR Article 17)');toast('Data erased');}
 
 // ─── Actions ──────────────────────────────────────
-async function matchAll(){fd('i','Running matching engine (file-based scoring)...');
+async function matchAll(){try{fd('i','Running matching engine (file-based scoring)...');
 const r=await fetch(A+'/api/matches/run',{method:'POST'});const d=await r.json();
 for(const m of d.matches){conns.push({f:m.agent_a,t:m.agent_b,s:m.signal_ab,o:Math.random()});fd('m',`${m.agent_a} ↔ ${m.agent_b}: ${m.signal_ab} | ${m.matched_on.join(', ')} [${m.method}]`);}
 const rm=document.getElementById('r-matches');rm.innerHTML=d.matches.slice(0,5).map(m=>`<div style="font-size:11px;padding:2px 0"><span class="sg sg-${m.signal_ab[0]}">${m.signal_ab}</span> ${m.agent_a} ↔ ${m.agent_b}</div>`).join('')||'<p class="d" style="font-size:12px">No matches</p>';
-await rf();toast(`${d.matches_created} matches created`);}
+await rf();toast(`${d.matches_created} matches created`);}catch(e){toast('Matching failed: '+e.message);fd('r','Error: '+e.message);}}
 
 async function delAgent(id){await fetch(A+'/api/agents/'+id,{method:'DELETE'});agents=agents.filter(a=>a.id!==id);conns=conns.filter(c=>c.f!==id&&c.t!==id);fd('r','Deleted agent');rf();sw('agents');renderAgents();}
 
-function addPersona(id){const p=prompt('Purpose (recruiting, cofounder, dating, freelance):');if(!p)return;fetch(A+'/api/agents/'+id+'/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose:p})}).then(()=>{toast('Persona added');openDetail(id);});}
+async function delDelegate(id,purpose){try{await sf(A+'/api/agents/'+id+'/delegates/'+purpose,{method:'DELETE'});toast(purpose+' delegate removed');await rf();openDetail(id);}catch(e){toast('Error: '+e.message);}}
+
+async function addDelegate(id){
+const purpose=prompt('Purpose for this delegate (recruiting, cofounder, dating, freelance):');
+if(!purpose)return;
+const guidance=prompt('Any guidance for the LLM? (optional — e.g., "focus on Rust experience")');
+fd('i',`Creating ${purpose} delegate via LLM distillation...`);
+toast(`Creating ${purpose} delegate...`);
+try{
+const evtSource=new EventSource(A+'/api/agents/'+id+'/delegates/'+encodeURIComponent(purpose)+'/distill'+(guidance?'?guidance='+encodeURIComponent(guidance):''));
+const logEl=document.getElementById('llm-'+id);
+if(logEl)logEl.innerHTML='<div class="lb"><div class="md">LLM Distillation — '+purpose+'</div><div id="distill-log" class="fd" style="max-height:300px"></div></div>';
+const dlog=document.getElementById('distill-log');
+evtSource.onmessage=(e)=>{
+const ev=JSON.parse(e.data);const cls={thinking:'i',tool_call:'m',tool_result:'d',file_written:'a',complete:'a',error:'r'}[ev.type]||'d';
+const prefix={thinking:'💭',tool_call:'🔧',tool_result:'📄',file_written:'✅',complete:'🎉',error:'❌'}[ev.type]||'';
+if(dlog)dlog.insertAdjacentHTML('beforeend',`<div class="e"><span class="${cls}">${prefix} ${ev.content.slice(0,300)}</span></div>`);
+if(dlog)dlog.scrollTop=dlog.scrollHeight;
+fd(cls,`[distill] ${ev.content.slice(0,80)}`);
+if(ev.type==='complete'){evtSource.close();toast(`${purpose} delegate created!`);
+sf(A+'/api/agents/'+id+'/delegates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose})}).then(()=>rf()).then(()=>openDetail(id));}
+if(ev.type==='error'){evtSource.close();toast('LLM failed, using defaults');
+sf(A+'/api/agents/'+id+'/delegates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose})}).then(()=>rf()).then(()=>openDetail(id));}
+};
+evtSource.onerror=()=>{evtSource.close();toast('LLM unavailable, using defaults');
+sf(A+'/api/agents/'+id+'/delegates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose})}).then(()=>rf()).then(()=>openDetail(id));};
+}catch(e){
+sf(A+'/api/agents/'+id+'/delegates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose})}).then(()=>rf()).then(()=>openDetail(id));}}
 
 async function loadFileTree(id){const el=document.getElementById('file-tree-'+id);el.innerHTML='<div class="lb"><div class="md">Loading file tree...</div></div>';
 try{const r=await fetch(A+'/api/agents/'+id+'/files');const d=await r.json();
@@ -777,6 +821,12 @@ el.innerHTML=`<div class="lb"><div class="md">${path}</div><pre style="white-spa
 
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection',e=>{console.error(e.reason);toast('Error: '+(e.reason?.message||'Something went wrong'));e.preventDefault();});
+
+// Safe fetch wrapper
+async function sf(url,opts){try{const r=await fetch(url,opts);if(!r.ok){const t=await r.text();let msg;try{msg=JSON.parse(t).error||t;}catch{msg=t;}throw new Error(msg);}return r;}catch(e){if(e.message==='Failed to fetch')throw new Error('Server not responding. Is agentverse serve running?');throw e;}}
+
 async function autoPop(){const ns=['Alice','Bob','Carol','Dave','Eve','Frank','Grace','Heidi'];
 const ps=['recruiting','recruiting','recruiting','cofounder','cofounder','recruiting','freelance','dating'];
 const sk=[['rust','typescript','distributed-systems'],['python','ml','pytorch'],['go','kubernetes','aws'],['product','strategy','fundraising'],['engineering','rust','systems'],['react','nextjs','typescript'],['python','django','postgresql'],['hiking','photography','cooking']];
@@ -790,10 +840,8 @@ function clearAll(){agents.forEach(a=>fetch(A+'/api/agents/'+a.id,{method:'DELET
 // ─── Add Agent Modal ──────────────────────────────
 function openAdd(){document.getElementById('modal').innerHTML=`
 <h3>Add Agent</h3>
-<div class="g2" style="gap:8px;margin-bottom:8px">
-<div><label>Name</label><input id="m-n" value="Agent-${agents.length+1}"></div>
-<div><label>Purpose</label><select id="m-p"><option value="recruiting">Recruiting</option><option value="cofounder">Cofounder</option><option value="dating">Dating</option><option value="freelance">Freelance</option></select></div>
-</div>
+<p style="font-size:11px;color:var(--dim);margin-bottom:8px">Create a main agent with their full profile. You'll create purpose-scoped delegates afterwards.</p>
+<label>Name</label><input id="m-n" value="Agent-${agents.length+1}" style="margin-bottom:8px">
 <label>Paste conversation text <span style="color:var(--dim);font-size:10px">(skills, about, etc. are extracted automatically)</span></label>
 <textarea id="m-text" style="min-height:120px" placeholder="Paste any conversation text here. The system will automatically extract skills, interests, values, career stage, and a summary.
 
@@ -809,7 +857,6 @@ document.getElementById('mbg').classList.add('on');}
 
 async function submitExtractAdd(){
 const n=document.getElementById('m-n').value||'Agent';
-const p=document.getElementById('m-p').value;
 const text=document.getElementById('m-text').value;
 const h=document.getElementById('m-h').value;
 const statusEl=document.getElementById('m-status');
@@ -818,7 +865,7 @@ if(!text.trim()){toast('Paste some conversation text');return;}
 
 statusEl.innerHTML='<div class="d">Extracting profile...</div>';
 
-const r=await fetch(A+'/api/extract-and-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,name:n,purpose:p,human_only_notes:h})});
+const r=await fetch(A+'/api/extract-and-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,name:n,purpose:'general',human_only_notes:h})});
 const d=await r.json();
 
 if(d.error){statusEl.innerHTML=`<div style="color:var(--red)">${d.error}</div>`;return;}

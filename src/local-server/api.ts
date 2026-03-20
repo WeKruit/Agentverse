@@ -40,6 +40,12 @@ import {
   readAgentMetadata,
   createDelegateTools,
   scoreViaFileTools,
+  createDelegate,
+  listDelegates,
+  readDelegateMetadata,
+  deleteDelegate,
+  scoreDelegatesViaFileTools,
+  createDelegateToolsForDelegate,
 } from "../filesystem/agent-fs.js";
 import {
   createMatch,
@@ -710,28 +716,153 @@ Rate compatibility. Respond with ONLY valid JSON:
     }
   });
 
-  // ─── Persona Management ─────────────────────────────────
+  // ─── Delegate Management ─────────────────────────────────
 
-  app.post("/api/agents/:id/personas", (req, res) => {
+  // Create a delegate via LLM distillation (SSE streaming)
+  app.get("/api/agents/:id/delegates/:purpose/distill", async (req, res) => {
+    const agent = agentRegistry.get(req.params.id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    const envKey = process.env.ANTHROPIC_API_KEY;
+    if (!envKey) return res.status(400).json({ error: "ANTHROPIC_API_KEY not set" });
+
+    try {
+      const { distillDelegateSSE } = await import("../filesystem/llm-distill.js");
+      distillDelegateSSE(
+        {
+          agentId: req.params.id,
+          purpose: req.params.purpose,
+          baseDir: agentBaseDir,
+          apiKey: envKey,
+          userGuidance: req.query.guidance as string | undefined,
+        },
+        res
+      );
+      // Track in registry
+      if (!agent.personas.includes(req.params.purpose)) {
+        agent.personas.push(req.params.purpose);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Create a delegate (deterministic fallback)
+  app.post("/api/agents/:id/delegates", async (req, res) => {
+    const agent = agentRegistry.get(req.params.id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    const { purpose, include_structured, include_evaluable, extra_structured, extra_evaluable } = req.body;
+    if (!purpose) return res.status(400).json({ error: "Purpose required" });
+
+    try {
+      const delegatePath = createDelegate(agentBaseDir, req.params.id, {
+        purpose,
+        include_structured,
+        include_evaluable,
+        extra_structured,
+        extra_evaluable,
+      });
+
+      // Track delegate in agent registry
+      if (!agent.personas.includes(purpose)) {
+        agent.personas.push(purpose);
+      }
+
+      // Submit delegate to matching bucket
+      const bucketMap: Record<string, string> = {
+        recruiting: "recruiting-swe", cofounder: "cofounder-search",
+        dating: "dating-general", freelance: "freelance-dev",
+      };
+      const bucketId = bucketMap[purpose] || "recruiting-swe";
+
+      // Read the delegate's structured data for the listing
+      const delegateMeta = readDelegateMetadata(agentBaseDir, req.params.id, purpose);
+      const delegateStructured: Record<string, any> = {};
+      const structDir = path.join(delegatePath, "structured");
+      if (fs.existsSync(structDir)) {
+        for (const file of fs.readdirSync(structDir)) {
+          if (file.endsWith(".json")) {
+            try {
+              delegateStructured[file.replace(".json", "")] = JSON.parse(
+                fs.readFileSync(path.join(structDir, file), "utf-8")
+              );
+            } catch {}
+          }
+        }
+      }
+
+      const { generateLocalEmbedding } = await import("../discovery/embeddings.js");
+      const embedding = generateLocalEmbedding(delegateStructured);
+
+      const filesystem = {
+        purpose,
+        created_at: new Date().toISOString(),
+        owner_did: delegateMeta?.did || agent.did,
+        structured: delegateStructured,
+      };
+
+      const listing = venue.submit(bucketId, filesystem, embedding);
+
+      res.json({
+        delegate: delegateMeta,
+        listing,
+        bucket: bucketId,
+        files_on_disk: delegatePath,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // List all delegates for an agent
+  app.get("/api/agents/:id/delegates", (req, res) => {
+    const agent = agentRegistry.get(req.params.id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    const purposes = listDelegates(agentBaseDir, req.params.id);
+    const delegates = purposes.map(p => readDelegateMetadata(agentBaseDir, req.params.id, p)).filter(Boolean);
+    res.json({ delegates });
+  });
+
+  // Get delegate file tree
+  app.get("/api/agents/:id/delegates/:purpose/files", (req, res) => {
+    try {
+      const tools = createDelegateToolsForDelegate(agentBaseDir, req.params.id, req.params.purpose);
+      const tree = buildFileTree(tools, ".");
+      res.json({ tree, agent_id: req.params.id, purpose: req.params.purpose });
+    } catch (err: any) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  // Delete a delegate
+  app.delete("/api/agents/:id/delegates/:purpose", (req, res) => {
+    const agent = agentRegistry.get(req.params.id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    deleteDelegate(agentBaseDir, req.params.id, req.params.purpose);
+    agent.personas = agent.personas.filter(p => p !== req.params.purpose);
+    res.json({ success: true });
+  });
+
+  // Backward-compatible persona endpoint (creates a delegate)
+  app.post("/api/agents/:id/personas", async (req, res) => {
     const agent = agentRegistry.get(req.params.id);
     if (!agent) return res.status(404).json({ error: "Agent not found" });
 
     const { purpose } = req.body;
     if (!purpose) return res.status(400).json({ error: "Purpose required" });
 
-    if (!agent.personas.includes(purpose)) {
-      agent.personas.push(purpose);
+    try {
+      createDelegate(agentBaseDir, req.params.id, { purpose });
+      if (!agent.personas.includes(purpose)) agent.personas.push(purpose);
+      res.json({ personas: agent.personas });
+    } catch (err: any) {
+      // If delegate creation fails (e.g., no structured data), just track it in memory
+      if (!agent.personas.includes(purpose)) agent.personas.push(purpose);
+      res.json({ personas: agent.personas });
     }
-
-    res.json({ personas: agent.personas });
-  });
-
-  app.delete("/api/agents/:id/personas/:purpose", (req, res) => {
-    const agent = agentRegistry.get(req.params.id);
-    if (!agent) return res.status(404).json({ error: "Agent not found" });
-
-    agent.personas = agent.personas.filter(p => p !== req.params.purpose);
-    res.json({ personas: agent.personas });
   });
 
   // ─── Reputation ─────────────────────────────────────────
